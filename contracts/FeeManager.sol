@@ -53,6 +53,9 @@ library FeeManager {
 
         // Liquidity
         uint256 targetLiquidityBps;
+
+        // Decimal handling
+        uint256 decimalFactor;        // 10^(18 - baseDecimals) for normalization
     }
 
     // ====================== EVENTS ======================
@@ -160,9 +163,9 @@ library FeeManager {
         feeNative = fee;
 
         if (fee > 0) {
-            // Fixed CRITICAL #3: Properly normalize fee for storage
-            // The fee needs to be normalized to 18 decimals for consistent storage
-            uint256 feeNormalized = fee * (10 ** (18 - _getDecimalOffset()));
+            // Normalize fee using the decimal factor stored in FeeStorage
+            // This supports any token decimal configuration
+            uint256 feeNormalized = fee * fs.decimalFactor;
             fs.accruedEntranceFees += feeNormalized;
             emit FeesAccrued(0, 0, feeNormalized, 0);
         }
@@ -226,9 +229,9 @@ library FeeManager {
         if (toPay == 0) revert NoFees();
 
         // Calculate paid amount in normalized form
-        // Fixed CRITICAL #3: Proper normalization using offset
-        uint256 paidIn18 = toPay * (10 ** (18 - _getDecimalOffset()));
-        
+        // Use the decimal factor stored in FeeStorage for proper normalization
+        uint256 paidIn18 = toPay * fs.decimalFactor;
+
         // Reset fees proportionally
         if (paidIn18 >= totalAccrued) {
             fs.accruedManagementFees = 0;
@@ -383,16 +386,4 @@ library FeeManager {
         return totalLiq >= required;
     }
 
-    /**
-     * @notice Helper to get decimal offset for normalization
-     * @dev This is a simplified version - actual implementation would get from vault
-     * Fixed CRITICAL #3: Removed conflicting placeholder functions
-     */
-    function _getDecimalOffset() internal pure returns (uint8) {
-        // This is called only from within the library for entrance fee calculation
-        // The vault will handle proper normalization via function pointers
-        // For now, assume standard 6 decimal tokens (USDC/USDT) - offset of 12
-        // This should ideally be passed as a parameter or accessed from storage
-        return 12;
-    }
 }

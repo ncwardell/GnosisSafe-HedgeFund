@@ -175,6 +175,9 @@ contract SafeHedgeFundVault is
         feeStorage.hwmRecoveryPct = 500; // 5%
         feeStorage.hwmRecoveryPeriod = 90 days;
 
+        // Initialize decimal factor for fee normalization
+        feeStorage.decimalFactor = DECIMAL_FACTOR;
+
         emit Initialized(block.timestamp);
     }
 
@@ -723,7 +726,7 @@ contract SafeHedgeFundVault is
     }
 
     function _burn(address user, uint256 shares) internal {
-        _burn(user, shares);
+        super._burn(user, shares);
     }
 
     function _emitDepositSkipped(uint256 idx, address user, uint256 amount, string memory reason) internal {
