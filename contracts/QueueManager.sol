@@ -38,6 +38,10 @@ library QueueManager {
         // Per-user pending counts
         mapping(address => uint256) pendingDeposits;
         mapping(address => uint256) pendingRedemptions;
+
+        // User queue index tracking for easy lookup
+        mapping(address => uint256[]) userDepositIndices;
+        mapping(address => uint256[]) userRedemptionIndices;
     }
 
     // ====================== EVENTS ======================
@@ -89,8 +93,11 @@ library QueueManager {
         // Fixed MEDIUM #8: Added overflow protection
         // While unlikely to overflow, adding check for safety
         if (qs.depositQueueTail == type(uint256).max) revert QueueOverflow();
+
+        // Track index for user lookup
+        qs.userDepositIndices[user].push(qs.depositQueueTail);
+
         qs.depositQueueTail++;
-        
         qs.pendingDeposits[user] += amount;
 
         emit DepositQueued(user, amount, nav);
@@ -125,8 +132,11 @@ library QueueManager {
 
         // Fixed MEDIUM #8: Added overflow protection
         if (qs.redemptionQueueTail == type(uint256).max) revert QueueOverflow();
+
+        // Track index for user lookup
+        qs.userRedemptionIndices[user].push(qs.redemptionQueueTail);
+
         qs.redemptionQueueTail++;
-        
         qs.pendingRedemptions[user] += shares;
 
         emit RedemptionQueued(user, shares, nav);
@@ -421,6 +431,70 @@ library QueueManager {
     {
         deposits = qs.depositQueueTail - qs.depositQueueHead;
         redemptions = qs.redemptionQueueTail - qs.redemptionQueueHead;
+    }
+
+    /**
+     * @notice Get all queue indices for a user's pending deposits
+     * @dev Returns indices that may include processed items - caller should check status
+     * @param qs Queue storage reference
+     * @param user Address of the user
+     * @return indices Array of queue indices where user has deposits
+     */
+    function getUserDepositIndices(
+        QueueStorage storage qs,
+        address user
+    ) external view returns (uint256[] memory indices) {
+        return qs.userDepositIndices[user];
+    }
+
+    /**
+     * @notice Get all queue indices for a user's pending redemptions
+     * @dev Returns indices that may include processed items - caller should check status
+     * @param qs Queue storage reference
+     * @param user Address of the user
+     * @return indices Array of queue indices where user has redemptions
+     */
+    function getUserRedemptionIndices(
+        QueueStorage storage qs,
+        address user
+    ) external view returns (uint256[] memory indices) {
+        return qs.userRedemptionIndices[user];
+    }
+
+    /**
+     * @notice Get detailed info for multiple deposit queue items by indices
+     * @param qs Queue storage reference
+     * @param indices Array of queue indices to fetch
+     * @return items Array of queue items
+     */
+    function getDepositsByIndices(
+        QueueStorage storage qs,
+        uint256[] calldata indices
+    ) external view returns (QueueItem[] memory items) {
+        items = new QueueItem[](indices.length);
+        for (uint256 i = 0; i < indices.length; i++) {
+            if (indices[i] < qs.depositQueueTail) {
+                items[i] = qs.depositQueue[indices[i]];
+            }
+        }
+    }
+
+    /**
+     * @notice Get detailed info for multiple redemption queue items by indices
+     * @param qs Queue storage reference
+     * @param indices Array of queue indices to fetch
+     * @return items Array of queue items
+     */
+    function getRedemptionsByIndices(
+        QueueStorage storage qs,
+        uint256[] calldata indices
+    ) external view returns (QueueItem[] memory items) {
+        items = new QueueItem[](indices.length);
+        for (uint256 i = 0; i < indices.length; i++) {
+            if (indices[i] < qs.redemptionQueueTail) {
+                items[i] = qs.redemptionQueue[indices[i]];
+            }
+        }
     }
 
     /**
