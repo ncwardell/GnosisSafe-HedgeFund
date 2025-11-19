@@ -801,6 +801,46 @@ contract SafeHedgeFundVault is
     }
 
     /**
+     * @notice Get all queue indices for a user's deposits (for KYC processing)
+     * @param user Address of the user
+     * @return Array of queue indices for this user's deposits
+     */
+    function getUserDepositIndices(address user) external view returns (uint256[] memory) {
+        return queueStorage.getUserDepositIndices(user);
+    }
+
+    /**
+     * @notice Get all queue indices for a user's redemptions
+     * @param user Address of the user
+     * @return Array of queue indices for this user's redemptions
+     */
+    function getUserRedemptionIndices(address user) external view returns (uint256[] memory) {
+        return queueStorage.getUserRedemptionIndices(user);
+    }
+
+    /**
+     * @notice Get detailed deposit info by queue indices
+     * @param indices Array of queue indices to fetch
+     * @return Array of queue items with user, amount, nav, processed status
+     */
+    function getDepositsByIndices(uint256[] calldata indices)
+        external view returns (QueueManager.QueueItem[] memory)
+    {
+        return queueStorage.getDepositsByIndices(indices);
+    }
+
+    /**
+     * @notice Get detailed redemption info by queue indices
+     * @param indices Array of queue indices to fetch
+     * @return Array of queue items with user, shares, nav, processed status
+     */
+    function getRedemptionsByIndices(uint256[] calldata indices)
+        external view returns (QueueManager.QueueItem[] memory)
+    {
+        return queueStorage.getRedemptionsByIndices(indices);
+    }
+
+    /**
      * @notice Get breakdown of all accrued fees
      * @return mgmt Accrued management fees
      * @return perf Accrued performance fees
