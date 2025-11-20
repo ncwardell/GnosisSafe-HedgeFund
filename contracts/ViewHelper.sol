@@ -5,20 +5,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./FeeManager.sol";
 import "./QueueManager.sol";
 
-/**
- * @title ViewHelper
- * @notice External library for view functions to reduce main contract size
- * @dev All functions are external/public to keep bytecode out of main contract
- */
 library ViewHelper {
-    /**
-     * @notice Calculate NAV (Net Asset Value) per share
-     * @param aum Total assets under management (normalized)
-     * @param totalSupply Total share supply
-     * @param totalFees Total accrued fees (normalized)
-     * @param decimalFactor Decimal normalization factor
-     * @return Current NAV per share in 18 decimals
-     */
+
     function calculateNav(
         uint256 aum,
         uint256 totalSupply,
@@ -32,14 +20,6 @@ library ViewHelper {
         return (netAum * 1e18) / totalSupply;
     }
 
-    /**
-     * @notice Estimate shares to be received for a deposit amount
-     * @param amount Amount of base tokens to deposit (native decimals)
-     * @param entranceFeeBps Entrance fee in basis points
-     * @param nav Current NAV per share
-     * @param decimalFactor Decimal normalization factor
-     * @return Estimated shares after entrance fees
-     */
     function estimateShares(
         uint256 amount,
         uint256 entranceFeeBps,
@@ -51,14 +31,6 @@ library ViewHelper {
         return nav > 0 ? (normalized * 1e18) / nav : normalized;
     }
 
-    /**
-     * @notice Estimate payout for redeeming shares
-     * @param shares Number of shares to redeem
-     * @param nav Current NAV per share
-     * @param exitFeeBps Exit fee in basis points
-     * @param decimalFactor Decimal normalization factor
-     * @return Estimated base tokens after exit fees (native decimals)
-     */
     function estimatePayout(
         uint256 shares,
         uint256 nav,
@@ -70,17 +42,6 @@ library ViewHelper {
         return net / decimalFactor;
     }
 
-    /**
-     * @notice Get high water mark status and recovery progress
-     * @param hwm Current high water mark
-     * @param lowestNav Lowest NAV during drawdown
-     * @param recoveryStart Recovery start timestamp
-     * @param hwmRecoveryPeriod Recovery period duration
-     * @return hwmOut Current high water mark
-     * @return lowestNavOut Lowest NAV during drawdown period
-     * @return recoveryStartOut Timestamp when recovery period started
-     * @return daysToReset Days remaining until HWM reset
-     */
     function getHWMStatus(
         uint256 hwm,
         uint256 lowestNav,
@@ -107,18 +68,6 @@ library ViewHelper {
         return (hwmOut, lowestNavOut, recoveryStartOut, daysToReset);
     }
 
-    /**
-     * @notice Get user's position details
-     * @param shareBalance User's share balance
-     * @param nav Current NAV per share
-     * @param pendingDep User's pending deposits amount
-     * @param pendingRed User's pending redemptions amount
-     * @param decimalFactor Decimal normalization factor
-     * @return shares User's share balance
-     * @return value Current value of shares in base tokens
-     * @return pendingDepOut User's pending deposits amount
-     * @return pendingRedOut User's pending redemptions amount
-     */
     function getPosition(
         uint256 shareBalance,
         uint256 nav,
@@ -137,14 +86,6 @@ library ViewHelper {
         pendingRedOut = pendingRed;
     }
 
-    /**
-     * @notice Get total AUM (Assets Under Management) after fees
-     * @param vaultBalance Vault's base token balance
-     * @param safeBalance Safe's base token balance
-     * @param totalFees Total accrued fees (normalized)
-     * @param decimalFactor Decimal normalization factor
-     * @return Total AUM in base token decimals
-     */
     function getTotalAum(
         uint256 vaultBalance,
         uint256 safeBalance,
@@ -156,10 +97,6 @@ library ViewHelper {
         return onChain >= fees ? onChain - fees : 0;
     }
 
-    /**
-     * @notice Comprehensive fund configuration view
-     * @dev Struct definition kept in library for use by main contract
-     */
     struct FundConfig {
         uint256 managementFeeBps;
         uint256 performanceFeeBps;

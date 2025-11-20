@@ -1,50 +1,35 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-/**
- * @title QueueManager Library
- * @notice Manages deposit and redemption queues with FIFO processing
- * @dev Fixed MEDIUM #8: Added overflow protection for queue indices
- * 
- * AUDIT FIXES APPLIED:
- * - Added overflow protection for queue tail increments (MEDIUM #8)
- * - Maintained efficient queue management
- */
 library QueueManager {
-    // ====================== CONSTANTS ======================
+
     uint256 private constant MAX_QUEUE_LENGTH = 1000;
     uint256 private constant MAX_PENDING_REQUESTS_PER_USER = 5;
 
-    // ====================== STRUCTS ======================
     struct QueueItem {
         address user;
-        uint256 amount;     // deposit: base token | redemption: shares
-        uint256 nav;        // NAV at queue time
+        uint256 amount;
+        uint256 nav;
         bool processed;
-        uint256 minOutput;  // min shares (deposit) or min payout (redemption)
+        uint256 minOutput;
     }
 
     struct QueueStorage {
-        // Deposit queue
         mapping(uint256 => QueueItem) depositQueue;
         uint256 depositQueueHead;
         uint256 depositQueueTail;
 
-        // Redemption queue
         mapping(uint256 => QueueItem) redemptionQueue;
         uint256 redemptionQueueHead;
         uint256 redemptionQueueTail;
 
-        // Per-user pending counts
         mapping(address => uint256) pendingDeposits;
         mapping(address => uint256) pendingRedemptions;
 
-        // User queue index tracking for easy lookup
         mapping(address => uint256[]) userDepositIndices;
         mapping(address => uint256[]) userRedemptionIndices;
     }
 
-    // ====================== EVENTS ======================
     event DepositQueued(address indexed user, uint256 amount, uint256 nav);
     event RedemptionQueued(address indexed user, uint256 shares, uint256 nav);
     event QueueProcessed(string queueType, uint256 count);
@@ -53,7 +38,6 @@ library QueueManager {
     event DepositSkipped(uint256 indexed queueIdx, address indexed user, uint256 amount, string reason);
     event RedemptionSkipped(uint256 indexed queueIdx, address indexed user, uint256 shares, string reason);
 
-    // ====================== ERRORS ======================
     error QueueFull();
     error NoPending();
     error InvalidBatch();
@@ -61,17 +45,6 @@ library QueueManager {
     error SlippageTooHigh();
     error QueueOverflow();
 
-    // ====================== EXTERNAL FUNCTIONS ======================
-
-    /**
-     * @notice Queue a deposit for later processing
-     * @dev Fixed MEDIUM #8: Added overflow protection for queue tail
-     * @param qs Queue storage reference
-     * @param user Address of depositor
-     * @param amount Amount of base tokens to deposit
-     * @param nav Current NAV at time of queuing
-     * @param minShares Minimum shares expected (slippage protection)
-     */
     function queueDeposit(
         QueueStorage storage qs,
         address user,
@@ -90,11 +63,8 @@ library QueueManager {
             minOutput: minShares
         });
 
-        // Fixed MEDIUM #8: Added overflow protection
-        // While unlikely to overflow, adding check for safety
         if (qs.depositQueueTail == type(uint256).max) revert QueueOverflow();
 
-        // Track index for user lookup
         qs.userDepositIndices[user].push(qs.depositQueueTail);
 
         qs.depositQueueTail++;
@@ -103,15 +73,6 @@ library QueueManager {
         emit DepositQueued(user, amount, nav);
     }
 
-    /**
-     * @notice Queue a redemption for later processing
-     * @dev Fixed MEDIUM #8: Added overflow protection for queue tail
-     * @param qs Queue storage reference
-     * @param user Address of redeemer
-     * @param shares Number of shares to redeem
-     * @param nav Current NAV at time of queuing
-     * @param minPayout Minimum payout expected (slippage protection)
-     */
     function queueRedemption(
         QueueStorage storage qs,
         address user,
@@ -130,10 +91,8 @@ library QueueManager {
             minOutput: minPayout
         });
 
-        // Fixed MEDIUM #8: Added overflow protection
         if (qs.redemptionQueueTail == type(uint256).max) revert QueueOverflow();
 
-        // Track index for user lookup
         qs.userRedemptionIndices[user].push(qs.redemptionQueueTail);
 
         qs.redemptionQueueTail++;
@@ -142,24 +101,12 @@ library QueueManager {
         emit RedemptionQueued(user, shares, nav);
     }
 
-    /**
-     * @notice Process a single deposit from the queue
-     * @dev Used for auto-processing deposits immediately after queuing
-     * @param qs Queue storage reference
-     * @param queueIdx Index of the deposit in the queue
-     * @param currentNav Current NAV per share
-     * @param normalize Function to normalize amounts to 18 decimals
-     * @param accrueEntranceFee Function to calculate and accrue entrance fees
-     * @return success Whether the deposit was processed successfully
-     * @return sharesMinted Number of shares minted
-     * @return netAmount Net deposit amount after fees
-     */
     function processSingleDeposit(
         QueueStorage storage qs,
         uint256 queueIdx,
         uint256 currentNav,
         function(uint256) view returns (uint256) normalize,
-        function(uint256) view returns (uint256) /* denormalize */,
+        function(uint256) view returns (uint256),
         function(uint256) internal returns (uint256, uint256) accrueEntranceFee
     ) internal returns (bool success, uint256 sharesMinted, uint256 netAmount) {
         if (queueIdx >= qs.depositQueueTail || qs.depositQueue[queueIdx].processed) return (false, 0, 0);
@@ -175,7 +122,7 @@ library QueueManager {
             : netAmountNormalized;
 
         if (sharesMinted < item.minOutput) {
-            return (false, 0, 0); // Slippage — caller should emit skipped
+            return (false, 0, 0);
         }
 
         item.processed = true;
@@ -185,18 +132,6 @@ library QueueManager {
         netAmount = netAmountNative;
     }
 
-    /**
-     * @notice Process a batch of deposits from the queue
-     * @dev Skips deposits that fail slippage checks and emits skip events
-     * @param qs Queue storage reference
-     * @param maxToProcess Maximum number of deposits to process
-     * @param currentNav Current NAV per share
-     * @param normalize Function to normalize amounts to 18 decimals
-     * @param accrueEntranceFee Function to calculate and accrue entrance fees
-     * @param emitDepositSkipped Function to emit skip events
-     * @param getMaxBatchSize Function to get maximum batch size
-     * @return processed Number of deposits successfully processed
-     */
     function processDepositBatch(
         QueueStorage storage qs,
         uint256 maxToProcess,
@@ -245,16 +180,6 @@ library QueueManager {
         return true;
     }
 
-    /**
-     * @notice Process a batch of redemptions from the queue
-     * @dev Skips redemptions that fail payout or slippage checks
-     * @param qs Queue storage reference
-     * @param maxToProcess Maximum number of redemptions to process
-     * @param payout Function to execute payout to user
-     * @param emitRedemptionSkipped Function to emit skip events
-     * @param getMaxBatchSize Function to get maximum batch size
-     * @return processed Number of redemptions successfully processed
-     */
     function processRedemptionBatch(
         QueueStorage storage qs,
         uint256 maxToProcess,
@@ -301,16 +226,6 @@ library QueueManager {
         return true;
     }
 
-    // ====================== CANCELLATIONS ======================
-
-    /**
-     * @notice Cancel pending deposits for a user
-     * @param qs Queue storage reference
-     * @param user Address of the user
-     * @param maxCancellations Maximum number of deposits to cancel
-     * @param transferBack Function to transfer tokens back to user
-     * @return cancelled Total amount cancelled
-     */
     function cancelDeposits(
         QueueStorage storage qs,
         address user,
@@ -334,14 +249,6 @@ library QueueManager {
         _cleanDepositQueue(qs);
     }
 
-    /**
-     * @notice Cancel pending redemptions for a user
-     * @param qs Queue storage reference
-     * @param user Address of the user
-     * @param maxCancellations Maximum number of redemptions to cancel
-     * @param mintBack Function to mint shares back to user
-     * @return cancelled Total shares cancelled
-     */
     function cancelRedemptions(
         QueueStorage storage qs,
         address user,
@@ -437,14 +344,6 @@ library QueueManager {
         _cleanRedemptionQueue(qs);
     }
 
-    // ====================== VIEW FUNCTIONS ======================
-
-    /**
-     * @notice Get the current length of both queues
-     * @param qs Queue storage reference
-     * @return deposits Number of pending deposits
-     * @return redemptions Number of pending redemptions
-     */
     function queueLengths(QueueStorage storage qs)
         external
         view
@@ -454,13 +353,6 @@ library QueueManager {
         redemptions = qs.redemptionQueueTail - qs.redemptionQueueHead;
     }
 
-    /**
-     * @notice Get all queue indices for a user's pending deposits
-     * @dev Returns indices that may include processed items - caller should check status
-     * @param qs Queue storage reference
-     * @param user Address of the user
-     * @return indices Array of queue indices where user has deposits
-     */
     function getUserDepositIndices(
         QueueStorage storage qs,
         address user
@@ -468,13 +360,6 @@ library QueueManager {
         return qs.userDepositIndices[user];
     }
 
-    /**
-     * @notice Get all queue indices for a user's pending redemptions
-     * @dev Returns indices that may include processed items - caller should check status
-     * @param qs Queue storage reference
-     * @param user Address of the user
-     * @return indices Array of queue indices where user has redemptions
-     */
     function getUserRedemptionIndices(
         QueueStorage storage qs,
         address user
@@ -482,12 +367,6 @@ library QueueManager {
         return qs.userRedemptionIndices[user];
     }
 
-    /**
-     * @notice Get detailed info for multiple deposit queue items by indices
-     * @param qs Queue storage reference
-     * @param indices Array of queue indices to fetch
-     * @return items Array of queue items
-     */
     function getDepositsByIndices(
         QueueStorage storage qs,
         uint256[] calldata indices
@@ -500,12 +379,6 @@ library QueueManager {
         }
     }
 
-    /**
-     * @notice Get detailed info for multiple redemption queue items by indices
-     * @param qs Queue storage reference
-     * @param indices Array of queue indices to fetch
-     * @return items Array of queue items
-     */
     function getRedemptionsByIndices(
         QueueStorage storage qs,
         uint256[] calldata indices
@@ -518,15 +391,6 @@ library QueueManager {
         }
     }
 
-    /**
-     * @notice Get a paginated list of pending deposits
-     * @param qs Queue storage reference
-     * @param start Starting index for pagination
-     * @param limit Maximum number of items to return
-     * @return users Array of depositor addresses
-     * @return amounts Array of deposit amounts
-     * @return navs Array of NAV values at queue time
-     */
     function getPendingDeposits(
         QueueStorage storage qs,
         uint256 start,
@@ -559,15 +423,6 @@ library QueueManager {
         assembly { mstore(users, idx) mstore(amounts, idx) mstore(navs, idx) }
     }
 
-    /**
-     * @notice Get a paginated list of pending redemptions
-     * @param qs Queue storage reference
-     * @param start Starting index for pagination
-     * @param limit Maximum number of items to return
-     * @return users Array of redeemer addresses
-     * @return shares Array of share amounts
-     * @return navs Array of NAV values at queue time
-     */
     function getPendingRedemptions(
         QueueStorage storage qs,
         uint256 start,
@@ -600,8 +455,6 @@ library QueueManager {
         assembly { mstore(users, idx) mstore(shares, idx) mstore(navs, idx) }
     }
 
-    // ====================== INTERNAL ======================
-
     function _enforceUserLimit(QueueStorage storage qs, address user, bool isDeposit) internal view {
         uint256 count = 0;
         if (isDeposit) {
@@ -619,10 +472,6 @@ library QueueManager {
         }
     }
 
-    /**
-     * @notice Clean processed items from deposit queue
-     * @dev Fixed LOW #15: Gas optimization - cleanup happens incrementally
-     */
     function _cleanDepositQueue(QueueStorage storage qs) internal {
         while (qs.depositQueueHead < qs.depositQueueTail && qs.depositQueue[qs.depositQueueHead].processed) {
             delete qs.depositQueue[qs.depositQueueHead];
@@ -630,10 +479,6 @@ library QueueManager {
         }
     }
 
-    /**
-     * @notice Clean processed items from redemption queue
-     * @dev Fixed LOW #15: Gas optimization - cleanup happens incrementally
-     */
     function _cleanRedemptionQueue(QueueStorage storage qs) internal {
         while (qs.redemptionQueueHead < qs.redemptionQueueTail && qs.redemptionQueue[qs.redemptionQueueHead].processed) {
             delete qs.redemptionQueue[qs.redemptionQueueHead];

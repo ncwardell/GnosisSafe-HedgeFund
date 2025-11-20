@@ -5,85 +5,128 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
- * @title FeeManager Library
- * @notice Manages all fee calculations and accruals
- * @dev Fixed CRITICAL #3: Removed internal placeholder functions that conflicted with vault's functions
- * 
- * AUDIT FIXES APPLIED:
- * - Fixed normalize/denormalize function usage (CRITICAL #3)
- * - All normalization now done via function pointers from vault
- * - Removed conflicting internal placeholders
+ * @title FeeManager
+ * @author Gnosis Safe Hedge Fund Team
+ * @notice Library managing all fee calculations, accruals, and high water mark (HWM) logic
+ * @dev This is the economic engine of the hedge fund. It handles:
+ *      - Management fees (annual % of AUM)
+ *      - Performance fees (% of profits above HWM)
+ *      - Entrance/Exit fees (one-time fees on deposits/withdrawals)
+ *      - High Water Mark tracking (ensures performance fees only on new profits)
+ *      - Fee payouts with liquidity requirements
+ *
+ * ARCHITECTURE ROLE:
+ * - Protects fund manager's compensation model
+ * - Ensures fair fee calculation (18-decimal normalization for all tokens)
+ * - Prevents fee extraction during low liquidity periods
+ * - Tracks performance relative to all-time high (HWM)
+ * - Manages configurable HWM reset after drawdowns
+ *
+ * KEY CONCEPTS:
+ * - All fees are accrued in 18-decimal normalized format internally
+ * - Fees are deducted from AUM before NAV calculation
+ * - Performance fees only charged on gains above previous high
+ * - HWM can reset after significant drawdown + recovery period
+ * - Target liquidity must be met before fee payouts
  */
 library FeeManager {
     using SafeERC20 for IERC20;
 
-    // ====================== CONSTANTS ======================
     uint256 private constant FEE_DENOMINATOR = 10_000;
     uint256 private constant SECONDS_PER_YEAR = 365.25 days;
     uint256 private constant MAX_TIME_DELTA = 365 days;
 
-    // ====================== STRUCTS ======================
+    /**
+     * @notice Central storage for all fee-related state
+     * @dev Uses 18-decimal normalization for cross-token compatibility
+     *
+     * @param managementFeeBps Annual management fee in basis points (100 = 1% per year)
+     * @param performanceFeeBps Performance fee in basis points (2000 = 20% of profits)
+     * @param entranceFeeBps One-time fee on deposits (100 = 1%)
+     * @param exitFeeBps One-time fee on redemptions (100 = 1%)
+     * @param accruedManagementFees Accumulated mgmt fees (18 decimals, not yet paid out)
+     * @param accruedPerformanceFees Accumulated perf fees (18 decimals)
+     * @param accruedEntranceFees Accumulated entrance fees (18 decimals)
+     * @param accruedExitFees Accumulated exit fees (18 decimals)
+     * @param highWaterMark Highest NAV ever reached (18 decimals) - performance fees only above this
+     * @param lowestNavInDrawdown Lowest NAV during current drawdown period
+     * @param recoveryStartTime When recovery from drawdown began (0 if not in recovery)
+     * @param hwmDrawdownPct Drawdown % threshold to trigger reset tracking (e.g., 6000 = 60%)
+     * @param hwmRecoveryPct Recovery % above lowest NAV to start reset timer (e.g., 500 = 5%)
+     * @param hwmRecoveryPeriod Time NAV must stay recovered before HWM resets (e.g., 90 days)
+     * @param aum Current assets under management after fees (native decimals)
+     * @param aumTimestamp Last time AUM was updated
+     * @param navPerShare Current NAV per share (18 decimals)
+     * @param targetLiquidityBps Minimum liquidity % required for fee payouts (500 = 5% of AUM)
+     * @param decimalFactor Conversion factor (10^(18-baseDecimals)) for normalization
+     */
     struct FeeStorage {
-        // Fee rates (bps)
         uint256 managementFeeBps;
         uint256 performanceFeeBps;
         uint256 entranceFeeBps;
         uint256 exitFeeBps;
 
-        // Accrued fees (18-decimal normalized)
         uint256 accruedManagementFees;
         uint256 accruedPerformanceFees;
         uint256 accruedEntranceFees;
         uint256 accruedExitFees;
 
-        // High Water Mark (configurable)
         uint256 highWaterMark;
         uint256 lowestNavInDrawdown;
         uint256 recoveryStartTime;
 
-        // HWM Configurable Parameters
-        uint256 hwmDrawdownPct;       // e.g. 6000 = 60%
-        uint256 hwmRecoveryPct;       // e.g. 500 = 5%
-        uint256 hwmRecoveryPeriod;    // e.g. 90 days
+        uint256 hwmDrawdownPct;
+        uint256 hwmRecoveryPct;
+        uint256 hwmRecoveryPeriod;
 
-        // AUM tracking
         uint256 aum;
         uint256 aumTimestamp;
         uint256 navPerShare;
 
-        // Liquidity
         uint256 targetLiquidityBps;
 
-        // Decimal handling
-        uint256 decimalFactor;        // 10^(18 - baseDecimals) for normalization
+        uint256 decimalFactor;
     }
 
-    // ====================== EVENTS ======================
     event FeesAccrued(uint256 mgmt, uint256 perf, uint256 entrance, uint256 exit);
     event FeesPaid(uint256 amount);
     event FeePaymentPartial(uint256 vaultPaid, uint256 safeFailed);
     event HWMReset(uint256 oldHWM, uint256 newHWM);
 
-    // ====================== ERRORS ======================
     error NoFees();
     error InsufficientLiquidity();
     error AUMStale();
     error AUMZero();
     error AUMBelowOnChain();
 
-    // ====================== EXTERNAL FUNCTIONS ======================
-
     /**
-     * @notice Updates AUM and accrues management and performance fees
-     * @dev Fixed CRITICAL #3: Uses normalize/denormalize function pointers from vault
+     * @notice Updates AUM and accrues time-based fees (management + performance)
+     * @dev CRITICAL FUNCTION: Called whenever off-chain AUM is reported. This is where
+     *      the fund's economic model comes together.
+     *
+     * WHY IT'S IMPORTANT:
+     * - Ensures fees are continuously accrued as AUM grows
+     * - Updates NAV which affects all deposits/redemptions
+     * - Tracks high water mark for fair performance fee calculation
+     * - Validates new AUM is >= on-chain liquidity (prevents fraud)
+     * - Prevents stale AUM from being used (max 3 days gap)
+     *
+     * FLOW:
+     * 1. Validate new AUM (non-zero, >= on-chain balance)
+     * 2. Accrue management fees (time-based)
+     * 3. Accrue performance fees (if above HWM)
+     * 4. Deduct ALL accrued fees from AUM
+     * 5. Calculate new NAV per share
+     * 6. Update high water mark logic
+     *
      * @param fs Fee storage reference
-     * @param newAum New total AUM value
-     * @param totalSupply Total share supply
-     * @param onChainLiquidity Total on-chain liquidity for validation
-     * @param normalize Function to normalize amounts to 18 decimals
-     * @param denormalize Function to denormalize amounts from 18 decimals
-     * @return adjustedAum AUM after deducting accrued fees
-     * @return newNavPerShare Updated NAV per share
+     * @param newAum Total AUM reported by off-chain keeper (includes vault + Safe balances + off-chain positions)
+     * @param totalSupply Current total share supply
+     * @param onChainLiquidity Sum of vault + Safe base token balances
+     * @param normalize Function to convert native decimals to 18 decimals
+     * @param denormalize Function to convert 18 decimals to native decimals
+     * @return adjustedAum AUM after deducting all accrued fees
+     * @return newNavPerShare Updated NAV per share (18 decimals)
      */
     function accrueFeesOnAumUpdate(
         FeeStorage storage fs,
@@ -96,15 +139,13 @@ library FeeManager {
         if (newAum == 0) revert AUMZero();
         if (newAum < onChainLiquidity) revert AUMBelowOnChain();
 
-        // Accrue management and performance fees
         (uint256 mgmtFee, uint256 perfFee) = _accrueFees(fs, newAum, totalSupply, normalize);
 
-        // Deduct all accrued fees from AUM
         adjustedAum = newAum - denormalize(
             fs.accruedManagementFees + fs.accruedPerformanceFees +
             fs.accruedEntranceFees + fs.accruedExitFees
         );
-        if (adjustedAum > newAum) adjustedAum = 0; // Underflow protection
+        if (adjustedAum > newAum) adjustedAum = 0;
 
         fs.aum = adjustedAum;
         fs.aumTimestamp = block.timestamp;
@@ -120,6 +161,29 @@ library FeeManager {
         }
     }
 
+    /**
+     * @notice Internal function to calculate and accrue time-based fees
+     * @dev Management fees accrue continuously based on time elapsed.
+     *      Performance fees only accrue when NAV exceeds high water mark.
+     *
+     * WHY IT'S IMPORTANT:
+     * - Management fee compensates fund manager regardless of performance
+     * - Performance fee aligns manager incentives with fund growth
+     * - Prevents charging performance fees on same gains twice (via HWM)
+     * - Caps time delta to prevent huge fee spikes after long periods
+     *
+     * CALCULATION DETAILS:
+     * - Management fee = (NAV * fee_bps / 10000) * (time_elapsed / year) * totalSupply
+     * - Performance fee = (NAV - HWM) * fee_bps / 10000 * totalSupply
+     * - Both are stored in 18-decimal format
+     *
+     * @param fs Fee storage reference
+     * @param newAum New total AUM being reported
+     * @param totalSupply Current share supply
+     * @param normalize Function to convert to 18 decimals
+     * @return mgmtFee Management fee accrued (18 decimals)
+     * @return perfFee Performance fee accrued (18 decimals)
+     */
     function _accrueFees(
         FeeStorage storage fs,
         uint256 newAum,
@@ -132,14 +196,12 @@ library FeeManager {
         if (timeDelta > MAX_TIME_DELTA) timeDelta = MAX_TIME_DELTA;
         if (timeDelta > 3 days) return (0, 0);
 
-        // Management fee
         if (fs.managementFeeBps > 0) {
             mgmtFee = ((fs.navPerShare * fs.managementFeeBps / FEE_DENOMINATOR) * timeDelta * totalSupply)
                 / SECONDS_PER_YEAR / 1e18;
             fs.accruedManagementFees += mgmtFee;
         }
 
-        // Performance fee
         uint256 tempNav = (normalize(newAum) * 1e18) / totalSupply;
         if (tempNav > fs.highWaterMark && fs.performanceFeeBps > 0) {
             perfFee = ((tempNav - fs.highWaterMark) * fs.performanceFeeBps * totalSupply)
@@ -150,11 +212,17 @@ library FeeManager {
 
     /**
      * @notice Accrues entrance fee on deposit
-     * @dev Returns amounts in native decimals (not normalized)
+     * @dev Called during deposit processing. Fee is deducted from deposit amount.
+     *
+     * WHY IT'S IMPORTANT:
+     * - Compensates fund for costs of deploying new capital
+     * - Discourages short-term trading (anti-gaming mechanism)
+     * - Returns net amount for share calculation
+     *
      * @param fs Fee storage reference
-     * @param depositAmount Total deposit amount before fees
-     * @return netAmount Net deposit amount after fee deduction
-     * @return feeNative Entrance fee amount in native decimals
+     * @param depositAmount Total amount being deposited (native decimals)
+     * @return netAmount Amount after fee deduction for share minting
+     * @return feeNative Fee amount in native decimals (kept in vault)
      */
     function accrueEntranceFee(
         FeeStorage storage fs,
@@ -165,8 +233,6 @@ library FeeManager {
         feeNative = fee;
 
         if (fee > 0) {
-            // Normalize fee using the decimal factor stored in FeeStorage
-            // This supports any token decimal configuration
             uint256 feeNormalized = fee * fs.decimalFactor;
             fs.accruedEntranceFees += feeNormalized;
             emit FeesAccrued(0, 0, feeNormalized, 0);
@@ -175,11 +241,17 @@ library FeeManager {
 
     /**
      * @notice Accrues exit fee on redemption
-     * @dev Works with normalized amounts (18 decimals)
+     * @dev Called during redemption processing. Fee is deducted from redemption value.
+     *
+     * WHY IT'S IMPORTANT:
+     * - Compensates fund for costs of liquidating positions
+     * - Protects remaining shareholders from dilution
+     * - Discourages short-term trading
+     *
      * @param fs Fee storage reference
-     * @param grossAmount Gross redemption amount before fees (normalized)
-     * @return netAmount Net redemption amount after fee deduction
-     * @return feeNative Exit fee amount
+     * @param grossAmount Gross redemption value (18 decimals)
+     * @return netAmount Net value after fee deduction
+     * @return feeNative Fee amount (18 decimals, will be kept in vault)
      */
     function accrueExitFee(
         FeeStorage storage fs,
@@ -196,15 +268,28 @@ library FeeManager {
     }
 
     /**
-     * @notice Pays out all accrued fees to the fee recipient
-     * @dev Fixed CRITICAL #3: Uses denormalize function pointer from vault
-     * @dev Requires target liquidity threshold to be met before payout
+     * @notice Pays out all accrued fees to fee recipient
+     * @dev CRITICAL: This is how fund manager gets paid. Includes safety checks.
+     *
+     * WHY IT'S IMPORTANT:
+     * - Final step in fee collection process
+     * - Requires minimum liquidity to prevent fund becoming illiquid
+     * - Tries vault first, then Safe wallet for additional liquidity
+     * - Handles partial payments if not enough liquidity available
+     * - Resets accrued fees proportionally based on amount paid
+     *
+     * SAFETY FEATURES:
+     * - Checks target liquidity threshold before allowing payout
+     * - Attempts Safe transaction gracefully (doesn't revert if Safe call fails)
+     * - Emits events for partial payments for monitoring
+     * - Only pays what's actually available (caps at total on-chain balance)
+     *
      * @param fs Fee storage reference
      * @param baseToken Base token contract
-     * @param feeRecipient Address to receive fees
+     * @param feeRecipient Address to receive fee payment
      * @param safeWallet Safe wallet address for additional liquidity
-     * @param isModuleEnabled Function to check if vault is enabled as Safe module
-     * @param denormalize Function to denormalize amounts from 18 decimals
+     * @param isModuleEnabled Function to check if vault is enabled module on Safe
+     * @param denormalize Function to convert 18 decimals to native
      */
     function payoutFees(
         FeeStorage storage fs,
@@ -226,15 +311,26 @@ library FeeManager {
 
         if (toPay == 0) revert NoFees();
 
-        // Reset fees proportionally based on amount paid
         _resetFeesProportionally(fs, toPay, totalAccrued);
 
-        // Execute transfers
         _executeFeePayout(baseToken, feeRecipient, safeWallet, toPay, isModuleEnabled);
 
         emit FeesPaid(toPay);
     }
 
+    /**
+     * @notice Resets accrued fees proportionally based on amount being paid out
+     * @dev If paying 50% of fees, reduces all accrued amounts by 50%
+     *
+     * WHY IT'S IMPORTANT:
+     * - Maintains correct accounting when only partial fees can be paid
+     * - Ensures each fee type is reduced proportionally
+     * - Allows tracking of unpaid fees for future payout
+     *
+     * @param fs Fee storage reference
+     * @param toPay Amount being paid in native decimals
+     * @param totalAccrued Total fees accrued in 18 decimals
+     */
     function _resetFeesProportionally(
         FeeStorage storage fs,
         uint256 toPay,
@@ -256,6 +352,22 @@ library FeeManager {
         }
     }
 
+    /**
+     * @notice Executes the actual fee payment transfer
+     * @dev Tries vault balance first, then Safe wallet if needed
+     *
+     * WHY IT'S IMPORTANT:
+     * - Maximizes chance of successful fee payout
+     * - Uses vault funds first (gas efficient)
+     * - Falls back to Safe only if needed
+     * - Emits event if Safe portion fails (for monitoring)
+     *
+     * @param baseToken Base token contract
+     * @param feeRecipient Address receiving fees
+     * @param safeWallet Safe wallet address
+     * @param toPay Total amount to pay
+     * @param isModuleEnabled Function to check module status
+     */
     function _executeFeePayout(
         IERC20 baseToken,
         address feeRecipient,
@@ -288,12 +400,17 @@ library FeeManager {
         }
     }
 
-    // ====================== VIEW HELPERS ======================
-
     /**
-     * @notice Get total accrued fees across all fee types
+     * @notice Returns total of all accrued fees
+     * @dev View function for external queries and UI display
+     *
+     * WHY IT'S IMPORTANT:
+     * - Shows total unpaid fees owed to fund manager
+     * - Used in NAV calculation (fees reduce AUM)
+     * - Helps monitor fee accrual rate
+     *
      * @param fs Fee storage reference
-     * @return Total accrued fees in 18 decimals
+     * @return Sum of all fee types in 18 decimals
      */
     function totalAccruedFees(FeeStorage storage fs) external view returns (uint256) {
         return fs.accruedManagementFees +
@@ -303,14 +420,21 @@ library FeeManager {
     }
 
     /**
-     * @notice Get detailed breakdown of accrued fees by type
+     * @notice Returns detailed breakdown of accrued fees by type
+     * @dev Useful for UI display and transparency
+     *
+     * WHY IT'S IMPORTANT:
+     * - Provides transparency on fee composition
+     * - Helps users understand what they're paying for
+     * - Enables monitoring of each fee stream
+     *
      * @param fs Fee storage reference
-     * @return mgmt Accrued management fees
-     * @return perf Accrued performance fees
-     * @return entrance Accrued entrance fees
-     * @return exit Accrued exit fees
-     * @return total Total accrued fees (normalized)
-     * @return totalNative Total fees in native decimals (set by vault)
+     * @return mgmt Management fees accrued
+     * @return perf Performance fees accrued
+     * @return entrance Entrance fees accrued
+     * @return exit Exit fees accrued
+     * @return total Sum of all fees (18 decimals)
+     * @return totalNative Placeholder (calculated by caller using denormalize)
      */
     function accruedFeesBreakdown(FeeStorage storage fs)
         external
@@ -329,15 +453,22 @@ library FeeManager {
         entrance = fs.accruedEntranceFees;
         exit = fs.accruedExitFees;
         total = mgmt + perf + entrance + exit;
-        totalNative = 0; // Note: totalNative will be calculated by vault using denormalize
+        totalNative = 0;
     }
 
     /**
-     * @notice Check if target liquidity threshold is met for fee payout
+     * @notice Checks if target liquidity requirement is met
+     * @dev External wrapper for internal check function
+     *
+     * WHY IT'S IMPORTANT:
+     * - Prevents fee extraction when fund is illiquid
+     * - Protects users from being unable to redeem
+     * - Ensures enough liquidity for normal operations
+     *
      * @param fs Fee storage reference
      * @param baseToken Base token contract
      * @param safeWallet Safe wallet address
-     * @return Whether target liquidity is met
+     * @return true if liquidity >= target threshold
      */
     function isTargetLiquidityMet(
         FeeStorage storage fs,
@@ -347,13 +478,33 @@ library FeeManager {
         return _isTargetLiquidityMet(fs, baseToken, safeWallet);
     }
 
-    // ====================== INTERNAL ======================
-
     /**
-     * @notice Update high water mark with configurable parameters
+     * @notice Updates high water mark based on current NAV
+     * @dev COMPLEX LOGIC: Manages HWM with configurable drawdown recovery
+     *
+     * WHY IT'S IMPORTANT:
+     * - Prevents charging performance fees on recovered losses
+     * - Fair to investors: only pay fees on true new profits
+     * - Configurable reset allows recovery from market crashes
+     * - Tracks drawdown and recovery periods transparently
+     *
+     * LOGIC FLOW:
+     * 1. If NAV > HWM: Set new HWM, reset drawdown tracking
+     * 2. If NAV drops below drawdown threshold: Start tracking lowest NAV
+     * 3. If NAV recovers above recovery threshold: Start recovery timer
+     * 4. If NAV stays recovered for full period: Reset HWM to current NAV
+     * 5. If NAV drops again during recovery: Reset timer
+     *
+     * EXAMPLE (with 60% drawdown, 5% recovery, 90 days):
+     * - HWM at $100, drops to $35 (65% drawdown) -> Start tracking
+     * - NAV recovers to $36.75 (5% above $35) -> Start 90-day timer
+     * - If stays above $36.75 for 90 days -> Reset HWM to current NAV
+     * - If drops below $36.75 -> Reset timer, must recover again
+     *
+     * @param fs Fee storage reference
+     * @param currentNav Current NAV per share (18 decimals)
      */
     function _updateHighWaterMark(FeeStorage storage fs, uint256 currentNav) internal {
-        // Update HWM if new high
         if (currentNav > fs.highWaterMark) {
             emit HWMReset(fs.highWaterMark, currentNav);
             fs.highWaterMark = currentNav;
@@ -362,7 +513,6 @@ library FeeManager {
             return;
         }
 
-        // Use configurable drawdown threshold
         uint256 drawdownThreshold = fs.highWaterMark * (FEE_DENOMINATOR - fs.hwmDrawdownPct) / FEE_DENOMINATOR;
         if (currentNav < drawdownThreshold && fs.lowestNavInDrawdown == 0) {
             fs.lowestNavInDrawdown = currentNav;
@@ -391,7 +541,18 @@ library FeeManager {
     }
 
     /**
-     * @notice Check if target liquidity requirement is met
+     * @notice Internal check for liquidity requirement
+     * @dev Compares on-chain liquidity to target percentage of AUM
+     *
+     * WHY IT'S IMPORTANT:
+     * - Prevents draining liquidity through fee payments
+     * - Ensures users can always redeem
+     * - Protects fund operational viability
+     *
+     * @param fs Fee storage reference
+     * @param baseToken Base token contract
+     * @param safeWallet Safe wallet address
+     * @return true if (vault + Safe balance) >= (AUM * targetLiquidityBps / 10000)
      */
     function _isTargetLiquidityMet(
         FeeStorage storage fs,
