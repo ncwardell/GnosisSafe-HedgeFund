@@ -161,7 +161,7 @@ library QueueManager {
         uint256 currentNav,
         function(uint256) view returns (uint256) normalize,
         function(uint256) view returns (uint256) denormalize,
-        function(uint256) external returns (uint256, uint256) accrueEntranceFee
+        function(uint256) internal returns (uint256, uint256) accrueEntranceFee
     ) internal returns (bool success, uint256 sharesMinted, uint256 netAmount) {
         if (queueIdx >= qs.depositQueueTail || qs.depositQueue[queueIdx].processed) return (false, 0, 0);
 
@@ -203,8 +203,8 @@ library QueueManager {
         uint256 maxToProcess,
         uint256 currentNav,
         function(uint256) view returns (uint256) normalize,
-        function(uint256) external returns (uint256, uint256) accrueEntranceFee,
-        function(uint256, address, uint256, string memory) external emitDepositSkipped,
+        function(uint256) internal returns (uint256, uint256) accrueEntranceFee,
+        function(uint256, address, uint256, string memory) internal emitDepositSkipped,
         function() view returns (uint256) getMaxBatchSize
     ) internal returns (uint256 processed) {
         uint256 batchLimit = getMaxBatchSize();
@@ -247,8 +247,8 @@ library QueueManager {
     function processRedemptionBatch(
         QueueStorage storage qs,
         uint256 maxToProcess,
-        function(address, uint256, uint256) external returns (bool, uint256) payout,
-        function(uint256, address, uint256, string memory) external emitRedemptionSkipped,
+        function(address, uint256, uint256) internal returns (bool, uint256) payout,
+        function(uint256, address, uint256, string memory) internal emitRedemptionSkipped,
         function() view returns (uint256) getMaxBatchSize
     ) internal returns (uint256 processed) {
         uint256 batchLimit = getMaxBatchSize();
@@ -294,8 +294,8 @@ library QueueManager {
         QueueStorage storage qs,
         address user,
         uint256 maxCancellations,
-        function(address, uint256) external transferBack
-    ) external returns (uint256 cancelled) {
+        function(address, uint256) internal transferBack
+    ) internal returns (uint256 cancelled) {
         if (qs.pendingDeposits[user] == 0) revert NoPending();
 
         uint256 count = 0;
@@ -325,8 +325,8 @@ library QueueManager {
         QueueStorage storage qs,
         address user,
         uint256 maxCancellations,
-        function(address, uint256) external mintBack
-    ) external returns (uint256 cancelled) {
+        function(address, uint256) internal mintBack
+    ) internal returns (uint256 cancelled) {
         if (qs.pendingRedemptions[user] == 0) revert NoPending();
 
         uint256 count = 0;
@@ -347,8 +347,8 @@ library QueueManager {
     function cancelDepositByIndex(
         QueueStorage storage qs,
         uint256 queueIdx,
-        function(address, uint256) external transferBack
-    ) external {
+        function(address, uint256) internal transferBack
+    ) internal {
         if (queueIdx >= qs.depositQueueTail) revert QueueIndexOutOfBounds();
         QueueItem storage item = qs.depositQueue[queueIdx];
         if (item.processed || item.amount == 0) return;
@@ -363,8 +363,8 @@ library QueueManager {
     function cancelRedemptionByIndex(
         QueueStorage storage qs,
         uint256 queueIdx,
-        function(address, uint256) external mintBack
-    ) external {
+        function(address, uint256) internal mintBack
+    ) internal {
         if (queueIdx >= qs.redemptionQueueTail) revert QueueIndexOutOfBounds();
         QueueItem storage item = qs.redemptionQueue[queueIdx];
         if (item.processed) return;
@@ -379,8 +379,8 @@ library QueueManager {
     function batchCancelDeposits(
         QueueStorage storage qs,
         uint256[] calldata indices,
-        function(address, uint256) external transferBack
-    ) external {
+        function(address, uint256) internal transferBack
+    ) internal {
         uint256 limit = indices.length > 50 ? 50 : indices.length;
         for (uint256 i = 0; i < limit; i++) {
             uint256 idx = indices[i];
@@ -399,8 +399,8 @@ library QueueManager {
     function batchCancelRedemptions(
         QueueStorage storage qs,
         uint256[] calldata indices,
-        function(address, uint256) external mintBack
-    ) external {
+        function(address, uint256) internal mintBack
+    ) internal {
         uint256 limit = indices.length > 50 ? 50 : indices.length;
         for (uint256 i = 0; i < limit; i++) {
             uint256 idx = indices[i];
