@@ -96,40 +96,15 @@ library FeeManager {
         if (newAum == 0) revert AUMZero();
         if (newAum < onChainLiquidity) revert AUMBelowOnChain();
 
-        uint256 mgmtFee = 0;
-        uint256 perfFee = 0;
-
-        if (totalSupply > 0) {
-            uint256 timeDelta = block.timestamp - fs.aumTimestamp;
-            if (timeDelta > MAX_TIME_DELTA) timeDelta = MAX_TIME_DELTA;
-
-            bool aumIsFresh = timeDelta <= 3 days;
-            if (aumIsFresh) {
-                // Management fee
-                if (fs.managementFeeBps > 0) {
-                    uint256 annualRate = (fs.navPerShare * fs.managementFeeBps) / FEE_DENOMINATOR;
-                    uint256 periodRate = (annualRate * timeDelta) / SECONDS_PER_YEAR;
-                    mgmtFee = (periodRate * totalSupply) / 1e18;
-                    fs.accruedManagementFees += mgmtFee;
-                }
-
-                // Performance fee
-                uint256 tempNav = (normalize(newAum) * 1e18) / totalSupply;
-                if (tempNav > fs.highWaterMark && fs.performanceFeeBps > 0) {
-                    perfFee = ((tempNav - fs.highWaterMark) * fs.performanceFeeBps / FEE_DENOMINATOR) * totalSupply / 1e18;
-                    fs.accruedPerformanceFees += perfFee;
-                }
-            }
-        }
+        // Accrue management and performance fees
+        (uint256 mgmtFee, uint256 perfFee) = _accrueFees(fs, newAum, totalSupply, normalize);
 
         // Deduct all accrued fees from AUM
-        uint256 totalAccrued = fs.accruedManagementFees +
-            fs.accruedPerformanceFees +
-            fs.accruedEntranceFees +
-            fs.accruedExitFees;
-
-        uint256 totalFeesNative = denormalize(totalAccrued);
-        adjustedAum = newAum >= totalFeesNative ? newAum - totalFeesNative : 0;
+        adjustedAum = newAum - denormalize(
+            fs.accruedManagementFees + fs.accruedPerformanceFees +
+            fs.accruedEntranceFees + fs.accruedExitFees
+        );
+        if (adjustedAum > newAum) adjustedAum = 0; // Underflow protection
 
         fs.aum = adjustedAum;
         fs.aumTimestamp = block.timestamp;
@@ -138,11 +113,38 @@ library FeeManager {
             : 1e18;
 
         fs.navPerShare = newNavPerShare;
-
         _updateHighWaterMark(fs, newNavPerShare);
 
         if (mgmtFee > 0 || perfFee > 0) {
             emit FeesAccrued(mgmtFee, perfFee, 0, 0);
+        }
+    }
+
+    function _accrueFees(
+        FeeStorage storage fs,
+        uint256 newAum,
+        uint256 totalSupply,
+        function(uint256) view returns (uint256) normalize
+    ) private returns (uint256 mgmtFee, uint256 perfFee) {
+        if (totalSupply == 0) return (0, 0);
+
+        uint256 timeDelta = block.timestamp - fs.aumTimestamp;
+        if (timeDelta > MAX_TIME_DELTA) timeDelta = MAX_TIME_DELTA;
+        if (timeDelta > 3 days) return (0, 0);
+
+        // Management fee
+        if (fs.managementFeeBps > 0) {
+            mgmtFee = ((fs.navPerShare * fs.managementFeeBps / FEE_DENOMINATOR) * timeDelta * totalSupply)
+                / SECONDS_PER_YEAR / 1e18;
+            fs.accruedManagementFees += mgmtFee;
+        }
+
+        // Performance fee
+        uint256 tempNav = (normalize(newAum) * 1e18) / totalSupply;
+        if (tempNav > fs.highWaterMark && fs.performanceFeeBps > 0) {
+            perfFee = ((tempNav - fs.highWaterMark) * fs.performanceFeeBps * totalSupply)
+                / FEE_DENOMINATOR / 1e18;
+            fs.accruedPerformanceFees += perfFee;
         }
     }
 
