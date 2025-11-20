@@ -627,13 +627,13 @@ contract SafeHedgeFundVault is
     function _processDepositMints(uint256 startIdx, uint256 count, uint256 nav) internal {
         ProcessingHelper.processDepositMints(
             queueStorage,
-            feeStorage,
             startIdx,
             count,
             nav,
             baseToken,
             safeWallet,
             _normalize,
+            _accrueEntranceFee,
             _mint,
             _emitDeposited
         );
@@ -913,24 +913,24 @@ contract SafeHedgeFundVault is
      * @dev Fixed LOW #14: Moved struct definition to ViewHelper library
      */
     function getFundConfig() external view returns (ViewHelper.FundConfig memory config) {
-        return ViewHelper.getFundConfig(
-            feeStorage.managementFeeBps,
-            feeStorage.performanceFeeBps,
-            feeStorage.entranceFeeBps,
-            feeStorage.exitFeeBps,
-            feeStorage.targetLiquidityBps,
-            minDeposit,
-            minRedemption,
-            maxAumAge,
-            maxBatchSize,
-            feeStorage.hwmDrawdownPct,
-            feeStorage.hwmRecoveryPct,
-            feeStorage.hwmRecoveryPeriod,
-            autoProcessDeposits,
-            autoPayoutRedemptions,
-            feeRecipient,
-            rescueTreasury,
-            feeStorage.aumTimestamp
-        );
+        return ViewHelper.FundConfig({
+            managementFeeBps: feeStorage.managementFeeBps,
+            performanceFeeBps: feeStorage.performanceFeeBps,
+            entranceFeeBps: feeStorage.entranceFeeBps,
+            exitFeeBps: feeStorage.exitFeeBps,
+            targetLiquidityBps: feeStorage.targetLiquidityBps,
+            minDeposit: minDeposit,
+            minRedemption: minRedemption,
+            maxAumAge: maxAumAge,
+            maxBatchSize: maxBatchSize,
+            hwmDrawdownPct: feeStorage.hwmDrawdownPct,
+            hwmRecoveryPct: feeStorage.hwmRecoveryPct,
+            hwmRecoveryPeriod: feeStorage.hwmRecoveryPeriod,
+            autoProcessDeposits: autoProcessDeposits,
+            autoPayoutRedemptions: autoPayoutRedemptions,
+            feeRecipient: feeRecipient,
+            rescueTreasury: rescueTreasury,
+            lastAumUpdate: feeStorage.aumTimestamp
+        });
     }
 }

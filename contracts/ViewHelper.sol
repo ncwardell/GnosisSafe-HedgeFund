@@ -195,68 +195,8 @@ library ViewHelper {
     }
 
     /**
-     * @notice Get comprehensive fund configuration
-     * @param managementFeeBps Management fee in basis points
-     * @param performanceFeeBps Performance fee in basis points
-     * @param entranceFeeBps Entrance fee in basis points
-     * @param exitFeeBps Exit fee in basis points
-     * @param targetLiquidityBps Target liquidity in basis points
-     * @param minDeposit Minimum deposit amount
-     * @param minRedemption Minimum redemption amount
-     * @param maxAumAge Maximum AUM age
-     * @param maxBatchSize Maximum batch size
-     * @param hwmDrawdownPct HWM drawdown percentage
-     * @param hwmRecoveryPct HWM recovery percentage
-     * @param hwmRecoveryPeriod HWM recovery period
-     * @param autoProcessDeposits Auto-process deposits flag
-     * @param autoPayoutRedemptions Auto-payout redemptions flag
-     * @param feeRecipient Fee recipient address
-     * @param rescueTreasury Rescue treasury address
-     * @param lastAumUpdate Last AUM update timestamp
-     * @return config Comprehensive fund configuration struct
-     */
-    function getFundConfig(
-        uint256 managementFeeBps,
-        uint256 performanceFeeBps,
-        uint256 entranceFeeBps,
-        uint256 exitFeeBps,
-        uint256 targetLiquidityBps,
-        uint256 minDeposit,
-        uint256 minRedemption,
-        uint256 maxAumAge,
-        uint256 maxBatchSize,
-        uint256 hwmDrawdownPct,
-        uint256 hwmRecoveryPct,
-        uint256 hwmRecoveryPeriod,
-        bool autoProcessDeposits,
-        bool autoPayoutRedemptions,
-        address feeRecipient,
-        address rescueTreasury,
-        uint256 lastAumUpdate
-    ) external pure returns (FundConfig memory config) {
-        return FundConfig({
-            managementFeeBps: managementFeeBps,
-            performanceFeeBps: performanceFeeBps,
-            entranceFeeBps: entranceFeeBps,
-            exitFeeBps: exitFeeBps,
-            targetLiquidityBps: targetLiquidityBps,
-            minDeposit: minDeposit,
-            minRedemption: minRedemption,
-            maxAumAge: maxAumAge,
-            maxBatchSize: maxBatchSize,
-            hwmDrawdownPct: hwmDrawdownPct,
-            hwmRecoveryPct: hwmRecoveryPct,
-            hwmRecoveryPeriod: hwmRecoveryPeriod,
-            autoProcessDeposits: autoProcessDeposits,
-            autoPayoutRedemptions: autoPayoutRedemptions,
-            feeRecipient: feeRecipient,
-            rescueTreasury: rescueTreasury,
-            lastAumUpdate: lastAumUpdate
-        });
-    }
-
-    /**
      * @notice Comprehensive fund configuration view
+     * @dev Struct definition kept in library for use by main contract
      */
     struct FundConfig {
         uint256 managementFeeBps;
