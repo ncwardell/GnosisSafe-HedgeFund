@@ -149,7 +149,6 @@ library QueueManager {
      * @param queueIdx Index of the deposit in the queue
      * @param currentNav Current NAV per share
      * @param normalize Function to normalize amounts to 18 decimals
-     * @param denormalize Function to denormalize amounts from 18 decimals
      * @param accrueEntranceFee Function to calculate and accrue entrance fees
      * @return success Whether the deposit was processed successfully
      * @return sharesMinted Number of shares minted
