@@ -13,6 +13,9 @@ import "./FeeManager.sol";
 import "./AUMManager.sol";
 import "./QueueManager.sol";
 import "./EmergencyManager.sol";
+import "./ViewHelper.sol";
+import "./AdminHelper.sol";
+import "./ProcessingHelper.sol";
 
 /**
  * @title SafeHedgeFundVault
@@ -43,30 +46,6 @@ contract SafeHedgeFundVault is
     using FeeManager for FeeManager.FeeStorage;
     using QueueManager for QueueManager.QueueStorage;
     using EmergencyManager for EmergencyManager.EmergencyStorage;
-
-    // ====================== STRUCTS ======================
-    /**
-     * @notice Comprehensive fund configuration view
-     */
-    struct FundConfig {
-        uint256 managementFeeBps;
-        uint256 performanceFeeBps;
-        uint256 entranceFeeBps;
-        uint256 exitFeeBps;
-        uint256 targetLiquidityBps;
-        uint256 minDeposit;
-        uint256 minRedemption;
-        uint256 maxAumAge;
-        uint256 maxBatchSize;
-        uint256 hwmDrawdownPct;
-        uint256 hwmRecoveryPct;
-        uint256 hwmRecoveryPeriod;
-        bool autoProcessDeposits;
-        bool autoPayoutRedemptions;
-        address feeRecipient;
-        address rescueTreasury;
-        uint256 lastAumUpdate;
-    }
 
     // ====================== CUSTOM ERRORS ======================
     error ZeroAddress();
@@ -466,31 +445,25 @@ contract SafeHedgeFundVault is
     }
 
     function _applyConfigChange(bytes32 keyHash, uint256 value) internal {
-        if (keyHash == keccak256("mgmt")) {
-            feeStorage.managementFeeBps = value;
-        } else if (keyHash == keccak256("perf")) {
-            feeStorage.performanceFeeBps = value;
-        } else if (keyHash == keccak256("entrance")) {
-            feeStorage.entranceFeeBps = value;
-        } else if (keyHash == keccak256("exit")) {
-            feeStorage.exitFeeBps = value;
-        } else if (keyHash == keccak256("targetLiquidity")) {
-            feeStorage.targetLiquidityBps = value;
-        } else if (keyHash == keccak256("minDeposit")) {
-            minDeposit = value;
-        } else if (keyHash == keccak256("minRedemption")) {
-            minRedemption = value;
-        } else if (keyHash == keccak256("maxAumAge")) {
-            maxAumAge = value;
-        } else if (keyHash == keccak256("maxBatchSize")) {
-            maxBatchSize = value;
-        } else if (keyHash == keccak256("hwmDrawdownPct")) {
-            feeStorage.hwmDrawdownPct = value;
-        } else if (keyHash == keccak256("hwmRecoveryPct")) {
-            feeStorage.hwmRecoveryPct = value;
-        } else if (keyHash == keccak256("hwmRecoveryPeriod")) {
-            feeStorage.hwmRecoveryPeriod = value;
-        }
+        (
+            uint256 newMinDeposit,
+            uint256 newMinRedemption,
+            uint256 newMaxAumAge,
+            uint256 newMaxBatchSize
+        ) = AdminHelper.applyConfigChange(
+            keyHash,
+            value,
+            feeStorage,
+            minDeposit,
+            minRedemption,
+            maxAumAge,
+            maxBatchSize
+        );
+
+        minDeposit = newMinDeposit;
+        minRedemption = newMinRedemption;
+        maxAumAge = newMaxAumAge;
+        maxBatchSize = newMaxBatchSize;
     }
 
     // ====================== EMERGENCY FUNCTIONS ======================
@@ -587,20 +560,21 @@ contract SafeHedgeFundVault is
      * @param amount Amount of tokens to rescue
      */
     function rescueERC20(address token, uint256 amount) external onlyRole(ADMIN_ROLE) {
-        if (token == address(baseToken)) revert CannotRescueBase();
-        IERC20(token).safeTransfer(rescueTreasury, amount);
-        emit TokensRescued(token, amount);
+        AdminHelper.rescueERC20(
+            token,
+            amount,
+            address(baseToken),
+            rescueTreasury,
+            _emitTokensRescued,
+            _revertCannotRescueBase
+        );
     }
 
     /**
      * @notice Rescue accidentally sent ETH
      */
     function rescueETH() external onlyRole(ADMIN_ROLE) {
-        uint256 bal = address(this).balance;
-        if (bal > 0) {
-            payable(rescueTreasury).transfer(bal);
-            emit ETHRescued(bal);
-        }
+        AdminHelper.rescueETH(rescueTreasury, _emitETHRescued);
     }
 
     // ====================== INTERNAL HELPERS ======================
@@ -651,23 +625,18 @@ contract SafeHedgeFundVault is
     }
 
     function _processDepositMints(uint256 startIdx, uint256 count, uint256 nav) internal {
-        for (uint256 i = 0; i < count; i++) {
-            uint256 idx = startIdx + i;
-            QueueManager.QueueItem storage item = queueStorage.depositQueue[idx];
-            
-            if (item.processed && item.amount > 0) {
-                (uint256 netAmountNative, ) = feeStorage.accrueEntranceFee(item.amount);
-                uint256 netAmount = _normalize(netAmountNative);
-                uint256 shares = nav > 0 ? (netAmount * 1e18) / nav : netAmount;
-                
-                // Fixed MEDIUM #9: Skip if zero shares
-                if (shares == 0) continue;
-                
-                _mint(item.user, shares);
-                baseToken.safeTransfer(safeWallet, netAmountNative);
-                emit Deposited(item.user, item.amount, shares);
-            }
-        }
+        ProcessingHelper.processDepositMints(
+            queueStorage,
+            feeStorage,
+            startIdx,
+            count,
+            nav,
+            baseToken,
+            safeWallet,
+            _normalize,
+            _mint,
+            _emitDeposited
+        );
     }
 
     /**
@@ -745,6 +714,22 @@ contract SafeHedgeFundVault is
         return feeStorage.accrueEntranceFee(amount);
     }
 
+    function _emitDeposited(address user, uint256 amount, uint256 shares) internal {
+        emit Deposited(user, amount, shares);
+    }
+
+    function _emitTokensRescued(address token, uint256 amount) internal {
+        emit TokensRescued(token, amount);
+    }
+
+    function _emitETHRescued(uint256 amount) internal {
+        emit ETHRescued(amount);
+    }
+
+    function _revertCannotRescueBase() internal pure {
+        revert CannotRescueBase();
+    }
+
     // ====================== VIEW HELPERS ======================
 
     /**
@@ -752,12 +737,11 @@ contract SafeHedgeFundVault is
      * @return Current NAV per share in 18 decimals
      */
     function navPerShare() public view aumNotStale returns (uint256) {
-        return AUMManager.getNav(
+        return ViewHelper.calculateNav(
             feeStorage.aum,
             totalSupply(),
             feeStorage.totalAccruedFees(),
-            _normalize,
-            _denormalize
+            DECIMAL_FACTOR
         );
     }
 
@@ -767,7 +751,7 @@ contract SafeHedgeFundVault is
      * @return Estimated shares after entrance fees
      */
     function estimateShares(uint256 amount) external view aumNotStale returns (uint256) {
-        return AUMManager.estimateShares(amount, feeStorage.entranceFeeBps, navPerShare(), _normalize);
+        return ViewHelper.estimateShares(amount, feeStorage.entranceFeeBps, navPerShare(), DECIMAL_FACTOR);
     }
 
     /**
@@ -776,7 +760,7 @@ contract SafeHedgeFundVault is
      * @return Estimated base tokens after exit fees
      */
     function estimatePayout(uint256 shares) external view aumNotStale returns (uint256) {
-        return AUMManager.estimatePayout(shares, navPerShare(), feeStorage.exitFeeBps, _denormalize);
+        return ViewHelper.estimatePayout(shares, navPerShare(), feeStorage.exitFeeBps, DECIMAL_FACTOR);
     }
 
     /**
@@ -787,11 +771,12 @@ contract SafeHedgeFundVault is
      * @return daysToReset Days remaining until HWM reset
      */
     function getHWMStatus() external view returns (uint256 hwm, uint256 lowestNav, uint256 recoveryStart, uint256 daysToReset) {
-        return AUMManager.getHWMStatus(
+        return ViewHelper.getHWMStatus(
             feeStorage.highWaterMark,
             feeStorage.lowestNavInDrawdown,
             feeStorage.recoveryStartTime,
-            navPerShare()
+            navPerShare(),
+            feeStorage.hwmRecoveryPeriod
         );
     }
 
@@ -857,8 +842,13 @@ contract SafeHedgeFundVault is
         uint256 mgmt, uint256 perf, uint256 entrance, uint256 exit,
         uint256 total, uint256 totalNative
     ) {
-        (mgmt, perf, entrance, exit, total, totalNative) = feeStorage.accruedFeesBreakdown();
-        totalNative = _denormalize(total);
+        return ViewHelper.accruedFeesBreakdown(
+            feeStorage.accruedMgmtFees,
+            feeStorage.accruedPerfFees,
+            feeStorage.accruedEntranceFees,
+            feeStorage.accruedExitFees,
+            DECIMAL_FACTOR
+        );
     }
 
     /**
@@ -872,10 +862,13 @@ contract SafeHedgeFundVault is
     function getPosition(address user) external view returns (
         uint256 shares, uint256 value, uint256 pendingDep, uint256 pendingRed
     ) {
-        shares = balanceOf(user);
-        value = _denormalize((shares * navPerShare()) / 1e18);
-        pendingDep = queueStorage.pendingDeposits[user];
-        pendingRed = queueStorage.pendingRedemptions[user];
+        return ViewHelper.getPosition(
+            balanceOf(user),
+            navPerShare(),
+            queueStorage.pendingDeposits[user],
+            queueStorage.pendingRedemptions[user],
+            DECIMAL_FACTOR
+        );
     }
 
     /**
@@ -883,9 +876,12 @@ contract SafeHedgeFundVault is
      * @return Total AUM in base token decimals
      */
     function getTotalAum() public view returns (uint256) {
-        uint256 onChain = baseToken.balanceOf(safeWallet) + baseToken.balanceOf(address(this));
-        uint256 fees = _denormalize(feeStorage.totalAccruedFees());
-        return onChain >= fees ? onChain - fees : 0;
+        return ViewHelper.getTotalAum(
+            baseToken.balanceOf(address(this)),
+            baseToken.balanceOf(safeWallet),
+            feeStorage.totalAccruedFees(),
+            DECIMAL_FACTOR
+        );
     }
 
     function _getTotalOnChainLiquidity() internal view returns (uint256) {
@@ -914,27 +910,27 @@ contract SafeHedgeFundVault is
 
     /**
      * @notice Get comprehensive fund configuration
-     * @dev Fixed LOW #14: Moved struct definition to top of contract
+     * @dev Fixed LOW #14: Moved struct definition to ViewHelper library
      */
-    function getFundConfig() external view returns (FundConfig memory config) {
-        return FundConfig({
-            managementFeeBps: feeStorage.managementFeeBps,
-            performanceFeeBps: feeStorage.performanceFeeBps,
-            entranceFeeBps: feeStorage.entranceFeeBps,
-            exitFeeBps: feeStorage.exitFeeBps,
-            targetLiquidityBps: feeStorage.targetLiquidityBps,
-            minDeposit: minDeposit,
-            minRedemption: minRedemption,
-            maxAumAge: maxAumAge,
-            maxBatchSize: maxBatchSize,
-            hwmDrawdownPct: feeStorage.hwmDrawdownPct,
-            hwmRecoveryPct: feeStorage.hwmRecoveryPct,
-            hwmRecoveryPeriod: feeStorage.hwmRecoveryPeriod,
-            autoProcessDeposits: autoProcessDeposits,
-            autoPayoutRedemptions: autoPayoutRedemptions,
-            feeRecipient: feeRecipient,
-            rescueTreasury: rescueTreasury,
-            lastAumUpdate: feeStorage.aumTimestamp
-        });
+    function getFundConfig() external view returns (ViewHelper.FundConfig memory config) {
+        return ViewHelper.getFundConfig(
+            feeStorage.managementFeeBps,
+            feeStorage.performanceFeeBps,
+            feeStorage.entranceFeeBps,
+            feeStorage.exitFeeBps,
+            feeStorage.targetLiquidityBps,
+            minDeposit,
+            minRedemption,
+            maxAumAge,
+            maxBatchSize,
+            feeStorage.hwmDrawdownPct,
+            feeStorage.hwmRecoveryPct,
+            feeStorage.hwmRecoveryPeriod,
+            autoProcessDeposits,
+            autoPayoutRedemptions,
+            feeRecipient,
+            rescueTreasury,
+            feeStorage.aumTimestamp
+        );
     }
 }
