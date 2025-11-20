@@ -85,7 +85,6 @@ library AUMManager {
      * @param highWaterMark Current high water mark value
      * @param lowestNavInDrawdown Lowest NAV recorded during drawdown period
      * @param recoveryStartTime Timestamp when recovery period started
-     * @param currentNav Current NAV per share
      * @return hwm Current high water mark
      * @return lowestNav Lowest NAV during drawdown
      * @return recoveryStart Recovery start timestamp
