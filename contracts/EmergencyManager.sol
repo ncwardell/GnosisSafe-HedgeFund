@@ -159,7 +159,7 @@ library EmergencyManager {
         uint256 amount,
         address safeWallet,
         function() view returns (bool) isModuleEnabled
-    ) external {
+    ) internal {
         uint256 vaultBal = baseToken.balanceOf(address(this));
 
         if (vaultBal >= amount) {
