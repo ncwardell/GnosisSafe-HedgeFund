@@ -27,18 +27,16 @@ This is a decentralized hedge fund built on top of Gnosis Safe, designed to allo
 │  │ • Redemptions → Queue → Burn Shares → Payout            │  │
 │  │ • AUM Updates → Fee Accrual → NAV Calculation           │  │
 │  │ • Emergency Mode → Direct Withdrawals                    │  │
+│  │ • Inlined Helper Functions (optimized for size)         │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  Uses 8 Library Contracts (storage via library pattern):        │
+│  Uses 4 Core Library Contracts (storage via library pattern):   │
 │  ┌────────────┬────────────┬────────────┬────────────┐        │
 │  │ConfigMgr   │FeeManager  │QueueMgr    │EmergencyMgr│        │
 │  │(Timelock)  │(Economics) │(Deposits/  │(Crisis     │        │
 │  │            │            │Redemptions)│Handling)   │        │
 │  └────────────┴────────────┴────────────┴────────────┘        │
-│  ┌────────────┬────────────┬────────────┬────────────┐        │
-│  │ViewHelper  │AdminHelper │Processing  │AUMManager  │        │
-│  │(Read-only) │(Utils)     │Helper      │(NAV Calc)  │        │
-│  └────────────┴────────────┴────────────┴────────────┘        │
+│  Located in: contracts/core/                                     │
 └─────────────────────────────────────────────────────────────────┘
                     ↕ Module Calls
 ┌─────────────────────────────────────────────────────────────────┐
@@ -168,48 +166,22 @@ Last resort protection if fund manager disappears, Safe keys lost, or fraud dete
 
 ---
 
-### 6. ViewHelper.sol - Read-Only Functions
-**Purpose**: External view functions to reduce main contract size
+### 6. Contract Size Optimization
+**Previous Architecture**: Used 8 separate library contracts (4 core + 4 helpers)
 
-**Functions**:
-- `calculateNav()` - Compute NAV per share
-- `estimateShares()` - Preview shares for deposit amount
-- `estimatePayout()` - Preview payout for redemption
-- `getHWMStatus()` - High water mark info
-- `getPosition()` - User's position summary
-- `getTotalAum()` - Total fund AUM after fees
+**Optimization Applied**:
+- **Inlined Small Libraries**: ViewHelper, AdminHelper, ProcessingHelper, and AUMManager functions are now inlined directly into SafeHedgeFundVault.sol
+- **Kept Core Libraries**: ConfigManager, FeeManager, QueueManager, and EmergencyManager remain as separate libraries due to their complexity
+- **New Structure**: Core libraries moved to `contracts/core/` folder for better organization
 
-**Why It's Important**:
-Main contract was hitting size limits. Moving view functions to library saves bytecode.
+**Why This Matters**:
+- Small libraries (< 120 lines) add deployment overhead that exceeds their benefits
+- Each separate library requires a deployment address stored in the main contract
+- DELEGATECALL operations to tiny libraries add unnecessary bytecode
+- Inlining small functions significantly reduces total contract size
+- Core libraries (300-600 lines) still benefit from separation
 
----
-
-### 7. AdminHelper.sol - Admin Utilities
-**Purpose**: Helper functions for admin operations
-
-**Functions**:
-- `rescueERC20()` - Recover accidentally sent tokens
-- `rescueETH()` - Recover accidentally sent ETH
-- `applyConfigChange()` - Apply executed config proposals
-
-**Why It's Important**:
-Reduces main contract size, groups administrative functions.
-
----
-
-### 8. ProcessingHelper.sol - Queue Processing
-**Purpose**: Helper functions for batch processing deposits
-
-**Why Separate**:
-Main contract was hitting size limits. Moving processing logic to library saves bytecode.
-
----
-
-### 9. AUMManager.sol - NAV Calculations
-**Purpose**: View functions for NAV and AUM calculations
-
-**Why Separate**:
-Additional view functions for backward compatibility and size optimization.
+**Result**: Main contract size reduced by eliminating 4 library deployment addresses and their associated overhead, helping address the 24KB deployment limit.
 
 ---
 
@@ -368,10 +340,11 @@ Additional view functions for backward compatibility and size optimization.
 
 ## Gas Optimization
 
-### Library Pattern
-- Logic in external libraries reduces main contract size
-- Avoids "contract too large" error
-- Functions delegatecalled, use main contract storage
+### Optimized Library Pattern
+- **Core Libraries**: ConfigManager, FeeManager, QueueManager, EmergencyManager use external library pattern (located in `contracts/core/`)
+- **Inlined Helpers**: Small utility functions inlined directly to eliminate library deployment overhead
+- **Size Reduction**: Eliminated 4 library deployments, each of which added ~4KB+ overhead
+- **Storage Efficiency**: Functions delegatecalled, use main contract storage
 
 ### Batch Processing
 - Process multiple deposits/redemptions in one transaction
@@ -383,10 +356,11 @@ Additional view functions for backward compatibility and size optimization.
 - Proposals deleted after execution
 - Reduces storage costs over time
 
-### View Functions in Libraries
-- Moves view function bytecode out of main contract
-- Further reduces main contract size
-- No impact on gas for state-changing operations
+### Contract Size Management
+- Main contract previously exceeded 24KB limit (38,266 bytes)
+- Structural reorganization targets significant size reduction
+- Small libraries (< 120 lines) inlined to eliminate deployment overhead
+- Large libraries (> 300 lines) kept separate to maintain modularity
 
 ## Economic Model
 
@@ -541,5 +515,24 @@ This ensures manager doesn't get paid twice for same performance.
 
 ---
 
+## File Structure
+
+```
+contracts/
+├── SafeHedgeFundVault.sol          # Main contract with inlined helper functions
+└── core/                            # Core library contracts (complex, kept separate)
+    ├── ConfigManager.sol            # Timelock-based configuration management (372 lines)
+    ├── FeeManager.sol               # Fee calculations and HWM logic (568 lines)
+    ├── QueueManager.sol             # Deposit/redemption queue management (488 lines)
+    └── EmergencyManager.sol         # Emergency withdrawal functionality (328 lines)
+```
+
+**Organization Rationale**:
+- **Main Contract**: Contains all business logic and inlined helper functions
+- **Core Folder**: Houses complex, reusable library contracts (>300 lines each)
+- **Inlined Functions**: ViewHelper, AdminHelper, ProcessingHelper, and AUMManager functions are integrated directly into the main contract for size optimization
+
+---
+
 **Last Updated**: 2025-11-20
-**Version**: 1.0.0
+**Version**: 1.1.0 (Structural Optimization)
