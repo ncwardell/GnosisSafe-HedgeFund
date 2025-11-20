@@ -775,7 +775,6 @@ contract SafeHedgeFundVault is
             feeStorage.highWaterMark,
             feeStorage.lowestNavInDrawdown,
             feeStorage.recoveryStartTime,
-            navPerShare(),
             feeStorage.hwmRecoveryPeriod
         );
     }
@@ -842,13 +841,8 @@ contract SafeHedgeFundVault is
         uint256 mgmt, uint256 perf, uint256 entrance, uint256 exit,
         uint256 total, uint256 totalNative
     ) {
-        return ViewHelper.accruedFeesBreakdown(
-            feeStorage.accruedMgmtFees,
-            feeStorage.accruedPerfFees,
-            feeStorage.accruedEntranceFees,
-            feeStorage.accruedExitFees,
-            DECIMAL_FACTOR
-        );
+        (mgmt, perf, entrance, exit, total, totalNative) = feeStorage.accruedFeesBreakdown();
+        totalNative = _denormalize(total);
     }
 
     /**

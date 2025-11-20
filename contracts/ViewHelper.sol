@@ -75,7 +75,6 @@ library ViewHelper {
      * @param hwm Current high water mark
      * @param lowestNav Lowest NAV during drawdown
      * @param recoveryStart Recovery start timestamp
-     * @param currentNav Current NAV per share
      * @param hwmRecoveryPeriod Recovery period duration
      * @return hwmOut Current high water mark
      * @return lowestNavOut Lowest NAV during drawdown period
@@ -86,7 +85,6 @@ library ViewHelper {
         uint256 hwm,
         uint256 lowestNav,
         uint256 recoveryStart,
-        uint256 currentNav,
         uint256 hwmRecoveryPeriod
     ) external view returns (
         uint256 hwmOut,
@@ -107,42 +105,6 @@ library ViewHelper {
         }
 
         return (hwmOut, lowestNavOut, recoveryStartOut, daysToReset);
-    }
-
-    /**
-     * @notice Get breakdown of all accrued fees
-     * @param accruedMgmtFees Accrued management fees
-     * @param accruedPerfFees Accrued performance fees
-     * @param accruedEntranceFees Accrued entrance fees
-     * @param accruedExitFees Accrued exit fees
-     * @param decimalFactor Decimal normalization factor
-     * @return mgmt Accrued management fees
-     * @return perf Accrued performance fees
-     * @return entrance Accrued entrance fees
-     * @return exit Accrued exit fees
-     * @return total Total accrued fees (normalized)
-     * @return totalNative Total accrued fees in native token decimals
-     */
-    function accruedFeesBreakdown(
-        uint256 accruedMgmtFees,
-        uint256 accruedPerfFees,
-        uint256 accruedEntranceFees,
-        uint256 accruedExitFees,
-        uint256 decimalFactor
-    ) external pure returns (
-        uint256 mgmt,
-        uint256 perf,
-        uint256 entrance,
-        uint256 exit,
-        uint256 total,
-        uint256 totalNative
-    ) {
-        mgmt = accruedMgmtFees;
-        perf = accruedPerfFees;
-        entrance = accruedEntranceFees;
-        exit = accruedExitFees;
-        total = mgmt + perf + entrance + exit;
-        totalNative = total / decimalFactor;
     }
 
     /**
