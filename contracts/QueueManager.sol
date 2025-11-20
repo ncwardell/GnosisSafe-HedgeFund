@@ -211,26 +211,38 @@ library QueueManager {
 
         uint256 start = qs.depositQueueHead;
         for (uint256 i = 0; i < maxToProcess && start + i < qs.depositQueueTail; i++) {
-            uint256 idx = start + i;
-            QueueItem storage item = qs.depositQueue[idx];
-            if (item.processed || item.amount == 0) continue;
-
-            (uint256 netAmountNative, ) = accrueEntranceFee(item.amount);
-            uint256 netAmount = normalize(netAmountNative);
-            uint256 shares = currentNav > 0 ? (netAmount * 1e18) / currentNav : netAmount;
-
-            if (shares < item.minOutput) {
-                emitDepositSkipped(idx, item.user, item.amount, "slippage");
-                continue;
+            if (_processDepositItem(qs, start + i, currentNav, normalize, accrueEntranceFee, emitDepositSkipped)) {
+                processed++;
             }
-
-            item.processed = true;
-            qs.pendingDeposits[item.user] -= item.amount;
-            processed++;
         }
 
         _cleanDepositQueue(qs);
         if (processed > 0) emit QueueProcessed("deposit", processed);
+    }
+
+    function _processDepositItem(
+        QueueStorage storage qs,
+        uint256 idx,
+        uint256 currentNav,
+        function(uint256) view returns (uint256) normalize,
+        function(uint256) internal returns (uint256, uint256) accrueEntranceFee,
+        function(uint256, address, uint256, string memory) internal emitDepositSkipped
+    ) private returns (bool success) {
+        QueueItem storage item = qs.depositQueue[idx];
+        if (item.processed || item.amount == 0) return false;
+
+        (uint256 netAmountNative, ) = accrueEntranceFee(item.amount);
+        uint256 netAmount = normalize(netAmountNative);
+        uint256 shares = currentNav > 0 ? (netAmount * 1e18) / currentNav : netAmount;
+
+        if (shares < item.minOutput) {
+            emitDepositSkipped(idx, item.user, item.amount, "slippage");
+            return false;
+        }
+
+        item.processed = true;
+        qs.pendingDeposits[item.user] -= item.amount;
+        return true;
     }
 
     /**
@@ -255,28 +267,38 @@ library QueueManager {
 
         uint256 start = qs.redemptionQueueHead;
         for (uint256 i = 0; i < maxToProcess && start + i < qs.redemptionQueueTail; i++) {
-            uint256 idx = start + i;
-            QueueItem storage item = qs.redemptionQueue[idx];
-            if (item.processed) continue;
-
-            (bool ok, uint256 paid) = payout(item.user, item.amount, item.nav);
-            if (!ok) {
-                emitRedemptionSkipped(idx, item.user, item.amount, "payout failed");
-                continue;
+            if (_processRedemptionItem(qs, start + i, payout, emitRedemptionSkipped)) {
+                processed++;
             }
-
-            if (paid < item.minOutput) {
-                emitRedemptionSkipped(idx, item.user, item.amount, "slippage");
-                continue;
-            }
-
-            item.processed = true;
-            qs.pendingRedemptions[item.user] -= item.amount;
-            processed++;
         }
 
         _cleanRedemptionQueue(qs);
         if (processed > 0) emit QueueProcessed("redemption", processed);
+    }
+
+    function _processRedemptionItem(
+        QueueStorage storage qs,
+        uint256 idx,
+        function(address, uint256, uint256) internal returns (bool, uint256) payout,
+        function(uint256, address, uint256, string memory) internal emitRedemptionSkipped
+    ) private returns (bool success) {
+        QueueItem storage item = qs.redemptionQueue[idx];
+        if (item.processed) return false;
+
+        (bool ok, uint256 paid) = payout(item.user, item.amount, item.nav);
+        if (!ok) {
+            emitRedemptionSkipped(idx, item.user, item.amount, "payout failed");
+            return false;
+        }
+
+        if (paid < item.minOutput) {
+            emitRedemptionSkipped(idx, item.user, item.amount, "slippage");
+            return false;
+        }
+
+        item.processed = true;
+        qs.pendingRedemptions[item.user] -= item.amount;
+        return true;
     }
 
     // ====================== CANCELLATIONS ======================
