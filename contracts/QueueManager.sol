@@ -160,7 +160,7 @@ library QueueManager {
         uint256 queueIdx,
         uint256 currentNav,
         function(uint256) view returns (uint256) normalize,
-        function(uint256) view returns (uint256) denormalize,
+        function(uint256) view returns (uint256) /* denormalize */,
         function(uint256) internal returns (uint256, uint256) accrueEntranceFee
     ) internal returns (bool success, uint256 sharesMinted, uint256 netAmount) {
         if (queueIdx >= qs.depositQueueTail || qs.depositQueue[queueIdx].processed) return (false, 0, 0);
@@ -581,7 +581,7 @@ library QueueManager {
 
     // ====================== INTERNAL ======================
 
-    function _enforceUserLimit(QueueStorage storage qs, address user, bool isDeposit) internal {
+    function _enforceUserLimit(QueueStorage storage qs, address user, bool isDeposit) internal view {
         uint256 count = 0;
         if (isDeposit) {
             for (uint256 i = qs.depositQueueHead; i < qs.depositQueueTail; i++) {

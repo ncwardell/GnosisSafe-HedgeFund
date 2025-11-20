@@ -314,7 +314,7 @@ contract SafeHedgeFundVault is
             maxToProcess,
             nav,
             _normalize,
-            feeStorage.accrueEntranceFee,
+            _accrueEntranceFee,
             _emitDepositSkipped,
             _getMaxBatchSize
         );
@@ -616,7 +616,7 @@ contract SafeHedgeFundVault is
             navPerShare(),
             _normalize,
             _denormalize,
-            feeStorage.accrueEntranceFee
+            _accrueEntranceFee
         );
         
         if (ok) {
@@ -739,6 +739,10 @@ contract SafeHedgeFundVault is
 
     function _getMaxBatchSize() internal view returns (uint256) {
         return maxBatchSize;
+    }
+
+    function _accrueEntranceFee(uint256 amount) internal returns (uint256, uint256) {
+        return feeStorage.accrueEntranceFee(amount);
     }
 
     // ====================== VIEW HELPERS ======================

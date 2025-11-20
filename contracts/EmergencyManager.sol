@@ -118,8 +118,8 @@ library EmergencyManager {
         uint256 shares,
         uint256 totalSupply,
         uint256 currentAum,
-        function(address, uint256) external burn,
-        function(address, uint256) external payout
+        function(address, uint256) internal burn,
+        function(address, uint256) internal payout
     ) external {
         if (!es.emergencyMode) revert NotInEmergency();
         if (shares == 0 || totalSupply == 0) revert NoSupply();
