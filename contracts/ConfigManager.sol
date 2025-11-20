@@ -1,36 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-/**
- * @title ConfigManager Library - PATCHED VERSION
- * @notice Handles timelocked proposals, cooldowns, and validation
- * @dev Used internally by SafeHedgeFundVault — not deployed separately
- * 
- * CHANGES FROM ORIGINAL:
- * - Fixed key hash visibility (HIGH-5) - changed from private to internal
- * - Increased timelock delay (MEDIUM-2)
- * - Improved proposal cleanup logic (LOW-3)
- */
 library ConfigManager {
-    // ====================== CONSTANTS ======================
-    // PATCH: Increased from 48 hours to 3 days (MEDIUM-2)
+
     uint256 public constant TIMELOCK_DELAY = 3 days;
     uint256 public constant PROPOSAL_COOLDOWN = 5 days;
-    uint256 public constant MAX_MGMT_FEE = 500; // 5%
-    uint256 public constant MAX_PERF_FEE = 3_000; // 30%
-    uint256 public constant MAX_ENTRANCE_FEE = 500; // 5%
-    uint256 public constant MAX_EXIT_FEE = 500; // 5%
-    uint256 public constant MIN_TARGET_LIQUIDITY = 200; // 2%
-    uint256 public constant MAX_TARGET_LIQUIDITY = 10000; // 100%
+    uint256 public constant MAX_MGMT_FEE = 500;
+    uint256 public constant MAX_PERF_FEE = 3_000;
+    uint256 public constant MAX_ENTRANCE_FEE = 500;
+    uint256 public constant MAX_EXIT_FEE = 500;
+    uint256 public constant MIN_TARGET_LIQUIDITY = 200;
+    uint256 public constant MAX_TARGET_LIQUIDITY = 10000;
     uint256 public constant MIN_AUM_AGE = 1 hours;
     uint256 public constant MAX_AUM_AGE = 30 days;
     uint256 public constant MIN_BATCH_SIZE = 1;
     uint256 public constant MAX_BATCH_SIZE = 200;
-    uint256 public constant MAX_HWM_DRAWDOWN = 10_000; // 100%
-    uint256 public constant MAX_HWM_RECOVERY_PCT = 10_000; // 100%
+    uint256 public constant MAX_HWM_DRAWDOWN = 10_000;
+    uint256 public constant MAX_HWM_RECOVERY_PCT = 10_000;
     uint256 public constant MIN_HWM_RECOVERY_PERIOD = 1 days;
 
-    // ====================== STRUCTS ======================
     struct Proposal {
         uint256 value;
         uint256 effectiveAt;
@@ -38,19 +26,15 @@ library ConfigManager {
     }
 
     struct ConfigStorage {
-        // Proposals
         mapping(bytes32 => Proposal) proposals;
         mapping(string => uint256) lastConfigChange;
         mapping(string => bytes32) activeProposalId;
     }
 
-    // ====================== EVENTS ======================
     event ProposalCreated(bytes32 indexed id, string key, uint256 value, uint256 effectiveAt);
     event ProposalCancelled(bytes32 indexed id, string key, uint256 value);
     event ConfigUpdated(string param, uint256 value);
 
-    // ====================== KEY HASHES ======================
-    // PATCH: Changed from private to internal for vault access (HIGH-5)
     bytes32 internal constant MGMT_KEY = keccak256("mgmt");
     bytes32 internal constant PERF_KEY = keccak256("perf");
     bytes32 internal constant ENTRANCE_KEY = keccak256("entrance");
@@ -65,7 +49,6 @@ library ConfigManager {
     bytes32 internal constant HWM_RECOVERY_PCT_KEY = keccak256("hwmRecoveryPct");
     bytes32 internal constant HWM_RECOVERY_PERIOD_KEY = keccak256("hwmRecoveryPeriod");
 
-    // ====================== ERRORS ======================
     error CooldownActive();
     error ProposalExists();
     error ValueTooHigh();
@@ -73,15 +56,6 @@ library ConfigManager {
     error NotReady();
     error InvalidKey();
 
-    // ====================== EXTERNAL FUNCTIONS ======================
-
-    /**
-     * @notice Propose a configuration change with timelock
-     * @dev Validates the value and enforces cooldown period between changes
-     * @param cs Configuration storage reference
-     * @param key Configuration parameter key
-     * @param value Proposed new value
-     */
     function proposeChange(
         ConfigStorage storage cs,
         string memory key,
@@ -111,15 +85,6 @@ library ConfigManager {
         emit ProposalCreated(id, key, value, p.effectiveAt);
     }
 
-    /**
-     * @notice Execute a pending proposal after timelock has expired
-     * @dev Applies the configuration change and cleans up proposal data
-     * @param cs Configuration storage reference
-     * @param key Configuration parameter key
-     * @param value Expected value (must match the proposal)
-     * @return keyHash The hashed key to apply in the main contract
-     * @return newValue The new value to apply
-     */
     function executeProposal(
         ConfigStorage storage cs,
         string memory key,
@@ -131,8 +96,7 @@ library ConfigManager {
 
         p.executed = true;
         cs.lastConfigChange[key] = block.timestamp;
-        
-        // PATCH: Improved cleanup logic (LOW-3)
+
         if (cs.activeProposalId[key] == id) {
             delete cs.activeProposalId[key];
         }
@@ -142,13 +106,6 @@ library ConfigManager {
         return (_getKeyHash(key), value);
     }
 
-    /**
-     * @notice Cancel a pending proposal before execution
-     * @dev Can be called by admin even if they didn't create the proposal
-     * @param cs Configuration storage reference
-     * @param key Configuration parameter key
-     * @param value Value of the proposal to cancel
-     */
     function cancelProposal(
         ConfigStorage storage cs,
         string memory key,
@@ -160,7 +117,6 @@ library ConfigManager {
         if (p.effectiveAt == 0 || p.executed) revert NotReady();
         if (block.timestamp >= p.effectiveAt) revert NotReady();
 
-        // PATCH: Improved cleanup - clear active if it matches (LOW-3)
         if (cs.activeProposalId[key] == id) {
             delete cs.activeProposalId[key];
         }
@@ -169,16 +125,6 @@ library ConfigManager {
         emit ProposalCancelled(id, key, value);
     }
 
-    // ====================== VIEW FUNCTIONS ======================
-
-    /**
-     * @notice Get the active proposal for a configuration key
-     * @dev Returns the proposal and whether it's still active
-     * @param cs Configuration storage reference
-     * @param key Configuration parameter key
-     * @return proposal The proposal details
-     * @return isActive Whether the proposal is still active
-     */
     function getActiveProposal(
         ConfigStorage storage cs,
         string memory key
@@ -193,13 +139,6 @@ library ConfigManager {
         }
     }
 
-    /**
-     * @notice Get a specific proposal by key and value
-     * @param cs Configuration storage reference
-     * @param key Configuration parameter key
-     * @param value Configuration parameter value
-     * @return Proposal details
-     */
     function getProposal(
         ConfigStorage storage cs,
         string memory key,
@@ -209,12 +148,6 @@ library ConfigManager {
         return cs.proposals[id];
     }
 
-    /**
-     * @notice Check if a configuration key has an active proposal
-     * @param cs Configuration storage reference
-     * @param key Configuration parameter key
-     * @return Whether an active proposal exists for this key
-     */
     function isProposalActive(
         ConfigStorage storage cs,
         string memory key
@@ -224,8 +157,6 @@ library ConfigManager {
         Proposal storage p = cs.proposals[id];
         return !p.executed && block.timestamp < p.effectiveAt + PROPOSAL_COOLDOWN;
     }
-
-    // ====================== INTERNAL HELPERS ======================
 
     function _checkCooldown(ConfigStorage storage cs, string memory key) internal view {
         if (block.timestamp < cs.lastConfigChange[key] + PROPOSAL_COOLDOWN) {
