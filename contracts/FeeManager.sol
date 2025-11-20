@@ -214,62 +214,78 @@ library FeeManager {
         function() view returns (bool) isModuleEnabled,
         function(uint256) view returns (uint256) denormalize
     ) internal {
-        uint256 totalAccrued = fs.accruedManagementFees +
-            fs.accruedPerformanceFees +
-            fs.accruedEntranceFees +
-            fs.accruedExitFees;
+        uint256 totalAccrued = fs.accruedManagementFees + fs.accruedPerformanceFees +
+            fs.accruedEntranceFees + fs.accruedExitFees;
 
         if (totalAccrued == 0) revert NoFees();
         if (!_isTargetLiquidityMet(fs, baseToken, safeWallet)) revert InsufficientLiquidity();
 
         uint256 totalNative = denormalize(totalAccrued);
-        uint256 vaultBal = baseToken.balanceOf(address(this));
-        uint256 safeBal = baseToken.balanceOf(safeWallet);
-        uint256 totalAvailable = vaultBal + safeBal;
-
+        uint256 totalAvailable = baseToken.balanceOf(address(this)) + baseToken.balanceOf(safeWallet);
         uint256 toPay = totalNative > totalAvailable ? totalAvailable : totalNative;
+
         if (toPay == 0) revert NoFees();
 
-        // Calculate paid amount in normalized form
-        // Use the decimal factor stored in FeeStorage for proper normalization
+        // Reset fees proportionally based on amount paid
+        _resetFeesProportionally(fs, toPay, totalAccrued);
+
+        // Execute transfers
+        _executeFeePayout(baseToken, feeRecipient, safeWallet, toPay, isModuleEnabled);
+
+        emit FeesPaid(toPay);
+    }
+
+    function _resetFeesProportionally(
+        FeeStorage storage fs,
+        uint256 toPay,
+        uint256 totalAccrued
+    ) private {
         uint256 paidIn18 = toPay * fs.decimalFactor;
 
-        // Reset fees proportionally
         if (paidIn18 >= totalAccrued) {
             fs.accruedManagementFees = 0;
             fs.accruedPerformanceFees = 0;
             fs.accruedEntranceFees = 0;
             fs.accruedExitFees = 0;
         } else {
-            uint256 ratio = (paidIn18 * 1e18) / totalAccrued;
-            uint256 remaining = 1e18 - ratio;
+            uint256 remaining = 1e18 - (paidIn18 * 1e18) / totalAccrued;
             fs.accruedManagementFees = (fs.accruedManagementFees * remaining) / 1e18;
             fs.accruedPerformanceFees = (fs.accruedPerformanceFees * remaining) / 1e18;
             fs.accruedEntranceFees = (fs.accruedEntranceFees * remaining) / 1e18;
             fs.accruedExitFees = (fs.accruedExitFees * remaining) / 1e18;
         }
+    }
 
-        // Transfer
+    function _executeFeePayout(
+        IERC20 baseToken,
+        address feeRecipient,
+        address safeWallet,
+        uint256 toPay,
+        function() view returns (bool) isModuleEnabled
+    ) private {
+        uint256 vaultBal = baseToken.balanceOf(address(this));
+
         if (vaultBal >= toPay) {
             baseToken.safeTransfer(feeRecipient, toPay);
-        } else {
-            if (vaultBal > 0) baseToken.safeTransfer(feeRecipient, vaultBal);
-            uint256 remaining = toPay - vaultBal;
-            if (remaining > 0 && isModuleEnabled()) {
-                bytes memory data = abi.encodeWithSelector(IERC20.transfer.selector, feeRecipient, remaining);
-                (bool ok,) = safeWallet.call(
-                    abi.encodeWithSignature(
-                        "execTransactionFromModule(address,uint256,bytes,uint8)",
-                        address(baseToken), 0, data, 0
-                    )
-                );
-                if (!ok) {
-                    emit FeePaymentPartial(vaultBal, remaining);
-                }
-            }
+            return;
         }
 
-        emit FeesPaid(toPay);
+        if (vaultBal > 0) baseToken.safeTransfer(feeRecipient, vaultBal);
+
+        uint256 remaining = toPay - vaultBal;
+        if (remaining > 0 && isModuleEnabled()) {
+            (bool ok,) = safeWallet.call(
+                abi.encodeWithSignature(
+                    "execTransactionFromModule(address,uint256,bytes,uint8)",
+                    address(baseToken), 0,
+                    abi.encodeWithSelector(IERC20.transfer.selector, feeRecipient, remaining),
+                    0
+                )
+            );
+            if (!ok) {
+                emit FeePaymentPartial(vaultBal, remaining);
+            }
+        }
     }
 
     // ====================== VIEW HELPERS ======================
