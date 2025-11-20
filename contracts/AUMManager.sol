@@ -31,7 +31,7 @@ library AUMManager {
         uint256 totalAccruedFees18,
         function(uint256) view returns (uint256) normalize,
         function(uint256) view returns (uint256) denormalize
-    ) external view returns (uint256 navPerShare) {
+    ) internal view returns (uint256 navPerShare) {
         if (totalSupply == 0) return 1e18;
 
         uint256 feesNative = denormalize(totalAccruedFees18);
@@ -53,7 +53,7 @@ library AUMManager {
         uint256 entranceFeeBps,
         uint256 navPerShare,
         function(uint256) view returns (uint256) normalize
-    ) external view returns (uint256 shares) {
+    ) internal view returns (uint256 shares) {
         if (navPerShare == 0) return 0;
         uint256 net = amount * (FEE_DENOMINATOR - entranceFeeBps) / FEE_DENOMINATOR;
         shares = (normalize(net) * 1e18) / navPerShare;
@@ -73,7 +73,7 @@ library AUMManager {
         uint256 navPerShare,
         uint256 exitFeeBps,
         function(uint256) view returns (uint256) denormalize
-    ) external view returns (uint256 payout) {
+    ) internal view returns (uint256 payout) {
         uint256 gross = (shares * navPerShare) / 1e18;
         uint256 fee = gross * exitFeeBps / FEE_DENOMINATOR;
         payout = denormalize(gross - fee);
@@ -96,7 +96,7 @@ library AUMManager {
         uint256 lowestNavInDrawdown,
         uint256 recoveryStartTime,
         uint256 currentNav
-    ) external view returns (
+    ) internal view returns (
         uint256 hwm,
         uint256 lowestNav,
         uint256 recoveryStart,

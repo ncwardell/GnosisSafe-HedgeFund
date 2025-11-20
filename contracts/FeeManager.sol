@@ -92,7 +92,7 @@ library FeeManager {
         uint256 onChainLiquidity,
         function(uint256) view returns (uint256) normalize,
         function(uint256) view returns (uint256) denormalize
-    ) external returns (uint256 adjustedAum, uint256 newNavPerShare) {
+    ) internal returns (uint256 adjustedAum, uint256 newNavPerShare) {
         if (newAum == 0) revert AUMZero();
         if (newAum < onChainLiquidity) revert AUMBelowOnChain();
 
@@ -211,7 +211,7 @@ library FeeManager {
         address safeWallet,
         function() view returns (bool) isModuleEnabled,
         function(uint256) view returns (uint256) denormalize
-    ) external {
+    ) internal {
         uint256 totalAccrued = fs.accruedManagementFees +
             fs.accruedPerformanceFees +
             fs.accruedEntranceFees +

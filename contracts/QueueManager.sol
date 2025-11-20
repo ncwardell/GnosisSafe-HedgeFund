@@ -204,7 +204,7 @@ library QueueManager {
         uint256 currentNav,
         function(uint256) view returns (uint256) normalize,
         function(uint256) external returns (uint256, uint256) accrueEntranceFee,
-        function(uint256, address, uint256, string) external emitDepositSkipped,
+        function(uint256, address, uint256, string memory) external emitDepositSkipped,
         function() view returns (uint256) getMaxBatchSize
     ) external returns (uint256 processed) {
         uint256 batchLimit = getMaxBatchSize();
@@ -248,7 +248,7 @@ library QueueManager {
         QueueStorage storage qs,
         uint256 maxToProcess,
         function(address, uint256, uint256) external returns (bool, uint256) payout,
-        function(uint256, address, uint256, string) external emitRedemptionSkipped,
+        function(uint256, address, uint256, string memory) external emitRedemptionSkipped,
         function() view returns (uint256) getMaxBatchSize
     ) external returns (uint256 processed) {
         uint256 batchLimit = getMaxBatchSize();

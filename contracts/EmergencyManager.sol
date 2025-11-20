@@ -33,7 +33,7 @@ library EmergencyManager {
     // ====================== ERRORS ======================
     error NotInEmergency();
     error NoSupply();
-    error PayoutFailed();
+    error PayoutExecutionFailed();
     error ModuleNotEnabled();
     error NotPaused();
     error ThresholdNotMet();
@@ -191,7 +191,7 @@ library EmergencyManager {
 
         if (!success) {
             emit PayoutFailed(user, remaining, "Safe exec failed");
-            revert PayoutFailed();
+            revert PayoutExecutionFailed();
         }
     }
 
