@@ -82,7 +82,7 @@ contract SafeHedgeFundVault is
     error ThresholdNotMet();
     error InEmergencyMode();
     error UnsupportedTokenDecimals();
-    error ProposalExecutionFailed(string reason);
+    error ProposalFailed(string reason);
     error ZeroSharesCalculated();
     error ZeroAmountCalculated();
 
