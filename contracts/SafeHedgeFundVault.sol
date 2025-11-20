@@ -8,14 +8,10 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
-import "./ConfigManager.sol";
-import "./FeeManager.sol";
-import "./AUMManager.sol";
-import "./QueueManager.sol";
-import "./EmergencyManager.sol";
-import "./ViewHelper.sol";
-import "./AdminHelper.sol";
-import "./ProcessingHelper.sol";
+import "./core/ConfigManager.sol";
+import "./core/FeeManager.sol";
+import "./core/QueueManager.sol";
+import "./core/EmergencyManager.sol";
 
 contract SafeHedgeFundVault is
     ERC20,
@@ -29,6 +25,27 @@ contract SafeHedgeFundVault is
     using FeeManager for FeeManager.FeeStorage;
     using QueueManager for QueueManager.QueueStorage;
     using EmergencyManager for EmergencyManager.EmergencyStorage;
+
+    // Inlined from ViewHelper
+    struct FundConfig {
+        uint256 managementFeeBps;
+        uint256 performanceFeeBps;
+        uint256 entranceFeeBps;
+        uint256 exitFeeBps;
+        uint256 targetLiquidityBps;
+        uint256 minDeposit;
+        uint256 minRedemption;
+        uint256 maxAumAge;
+        uint256 maxBatchSize;
+        uint256 hwmDrawdownPct;
+        uint256 hwmRecoveryPct;
+        uint256 hwmRecoveryPeriod;
+        bool autoProcessDeposits;
+        bool autoPayoutRedemptions;
+        address feeRecipient;
+        address rescueTreasury;
+        uint256 lastAumUpdate;
+    }
 
     error ZeroAddress();
     error BelowMinimum();
@@ -325,25 +342,32 @@ contract SafeHedgeFundVault is
     }
 
     function _applyConfigChange(bytes32 keyHash, uint256 value) internal {
-        (
-            uint256 newMinDeposit,
-            uint256 newMinRedemption,
-            uint256 newMaxAumAge,
-            uint256 newMaxBatchSize
-        ) = AdminHelper.applyConfigChange(
-            keyHash,
-            value,
-            feeStorage,
-            minDeposit,
-            minRedemption,
-            maxAumAge,
-            maxBatchSize
-        );
-
-        minDeposit = newMinDeposit;
-        minRedemption = newMinRedemption;
-        maxAumAge = newMaxAumAge;
-        maxBatchSize = newMaxBatchSize;
+        // Inlined from AdminHelper
+        if (keyHash == keccak256("mgmt")) {
+            feeStorage.managementFeeBps = value;
+        } else if (keyHash == keccak256("perf")) {
+            feeStorage.performanceFeeBps = value;
+        } else if (keyHash == keccak256("entrance")) {
+            feeStorage.entranceFeeBps = value;
+        } else if (keyHash == keccak256("exit")) {
+            feeStorage.exitFeeBps = value;
+        } else if (keyHash == keccak256("targetLiquidity")) {
+            feeStorage.targetLiquidityBps = value;
+        } else if (keyHash == keccak256("minDeposit")) {
+            minDeposit = value;
+        } else if (keyHash == keccak256("minRedemption")) {
+            minRedemption = value;
+        } else if (keyHash == keccak256("maxAumAge")) {
+            maxAumAge = value;
+        } else if (keyHash == keccak256("maxBatchSize")) {
+            maxBatchSize = value;
+        } else if (keyHash == keccak256("hwmDrawdownPct")) {
+            feeStorage.hwmDrawdownPct = value;
+        } else if (keyHash == keccak256("hwmRecoveryPct")) {
+            feeStorage.hwmRecoveryPct = value;
+        } else if (keyHash == keccak256("hwmRecoveryPeriod")) {
+            feeStorage.hwmRecoveryPeriod = value;
+        }
     }
 
     function triggerEmergency()
@@ -399,18 +423,19 @@ contract SafeHedgeFundVault is
     }
 
     function rescueERC20(address token, uint256 amount) external onlyRole(ADMIN_ROLE) {
-        AdminHelper.rescueERC20(
-            token,
-            amount,
-            address(baseToken),
-            rescueTreasury,
-            _emitTokensRescued,
-            _revertCannotRescueBase
-        );
+        // Inlined from AdminHelper
+        if (token == address(baseToken)) revert CannotRescueBase();
+        IERC20(token).safeTransfer(rescueTreasury, amount);
+        emit TokensRescued(token, amount);
     }
 
     function rescueETH() external onlyRole(ADMIN_ROLE) {
-        AdminHelper.rescueETH(rescueTreasury, _emitETHRescued);
+        // Inlined from AdminHelper
+        uint256 bal = address(this).balance;
+        if (bal > 0) {
+            payable(rescueTreasury).transfer(bal);
+            emit ETHRescued(bal);
+        }
     }
 
     function _tryAutoProcessDeposit(uint256 queueIdx) internal {
@@ -450,18 +475,23 @@ contract SafeHedgeFundVault is
     }
 
     function _processDepositMints(uint256 startIdx, uint256 count, uint256 nav) internal {
-        ProcessingHelper.processDepositMints(
-            queueStorage,
-            startIdx,
-            count,
-            nav,
-            baseToken,
-            safeWallet,
-            _normalize,
-            _accrueEntranceFee,
-            _mint,
-            _emitDeposited
-        );
+        // Inlined from ProcessingHelper
+        for (uint256 i = 0; i < count; i++) {
+            uint256 idx = startIdx + i;
+            QueueManager.QueueItem storage item = queueStorage.depositQueue[idx];
+
+            if (item.processed && item.amount > 0) {
+                (uint256 netAmountNative, ) = feeStorage.accrueEntranceFee(item.amount);
+                uint256 netAmount = _normalize(netAmountNative);
+                uint256 shares = nav > 0 ? (netAmount * 1e18) / nav : netAmount;
+
+                if (shares == 0) continue;
+
+                _mint(item.user, shares);
+                baseToken.safeTransfer(safeWallet, netAmountNative);
+                emit Deposited(item.user, item.amount, shares);
+            }
+        }
     }
 
     function _payout(address user, uint256 shares, uint256 nav)
@@ -550,29 +580,45 @@ contract SafeHedgeFundVault is
     }
 
     function navPerShare() public view aumNotStale returns (uint256) {
-        return ViewHelper.calculateNav(
-            feeStorage.aum,
-            totalSupply(),
-            feeStorage.totalAccruedFees(),
-            DECIMAL_FACTOR
-        );
+        // Inlined from ViewHelper
+        uint256 netAum = feeStorage.aum > feeStorage.totalAccruedFees()
+            ? feeStorage.aum - feeStorage.totalAccruedFees()
+            : 0;
+        if (totalSupply() == 0) {
+            return DECIMAL_FACTOR * 1e18;
+        }
+        return (netAum * 1e18) / totalSupply();
     }
 
     function estimateShares(uint256 amount) external view aumNotStale returns (uint256) {
-        return ViewHelper.estimateShares(amount, feeStorage.entranceFeeBps, navPerShare(), DECIMAL_FACTOR);
+        // Inlined from ViewHelper
+        uint256 netAmount = amount - (amount * feeStorage.entranceFeeBps) / 10000;
+        uint256 normalized = netAmount * DECIMAL_FACTOR;
+        uint256 nav = navPerShare();
+        return nav > 0 ? (normalized * 1e18) / nav : normalized;
     }
 
     function estimatePayout(uint256 shares) external view aumNotStale returns (uint256) {
-        return ViewHelper.estimatePayout(shares, navPerShare(), feeStorage.exitFeeBps, DECIMAL_FACTOR);
+        // Inlined from ViewHelper
+        uint256 nav = navPerShare();
+        uint256 gross = (shares * nav) / 1e18;
+        uint256 net = gross - (gross * feeStorage.exitFeeBps) / 10000;
+        return net / DECIMAL_FACTOR;
     }
 
     function getHWMStatus() external view returns (uint256 hwm, uint256 lowestNav, uint256 recoveryStart, uint256 daysToReset) {
-        return ViewHelper.getHWMStatus(
-            feeStorage.highWaterMark,
-            feeStorage.lowestNavInDrawdown,
-            feeStorage.recoveryStartTime,
-            feeStorage.hwmRecoveryPeriod
-        );
+        // Inlined from ViewHelper
+        hwm = feeStorage.highWaterMark;
+        lowestNav = feeStorage.lowestNavInDrawdown;
+        recoveryStart = feeStorage.recoveryStartTime;
+
+        if (recoveryStart > 0 && block.timestamp < recoveryStart + feeStorage.hwmRecoveryPeriod) {
+            uint256 elapsed = block.timestamp - recoveryStart;
+            uint256 remaining = feeStorage.hwmRecoveryPeriod - elapsed;
+            daysToReset = remaining / 1 days;
+        } else {
+            daysToReset = 0;
+        }
     }
 
     function queueLengths() external view returns (uint256 deposits, uint256 redemptions) {
@@ -610,22 +656,18 @@ contract SafeHedgeFundVault is
     function getPosition(address user) external view returns (
         uint256 shares, uint256 value, uint256 pendingDep, uint256 pendingRed
     ) {
-        return ViewHelper.getPosition(
-            balanceOf(user),
-            navPerShare(),
-            queueStorage.pendingDeposits[user],
-            queueStorage.pendingRedemptions[user],
-            DECIMAL_FACTOR
-        );
+        // Inlined from ViewHelper
+        shares = balanceOf(user);
+        value = ((shares * navPerShare()) / 1e18) / DECIMAL_FACTOR;
+        pendingDep = queueStorage.pendingDeposits[user];
+        pendingRed = queueStorage.pendingRedemptions[user];
     }
 
     function getTotalAum() public view returns (uint256) {
-        return ViewHelper.getTotalAum(
-            baseToken.balanceOf(address(this)),
-            baseToken.balanceOf(safeWallet),
-            feeStorage.totalAccruedFees(),
-            DECIMAL_FACTOR
-        );
+        // Inlined from ViewHelper
+        uint256 onChain = baseToken.balanceOf(address(this)) + baseToken.balanceOf(safeWallet);
+        uint256 fees = feeStorage.totalAccruedFees() / DECIMAL_FACTOR;
+        return onChain >= fees ? onChain - fees : 0;
     }
 
     function _getTotalOnChainLiquidity() internal view returns (uint256) {
@@ -652,8 +694,8 @@ contract SafeHedgeFundVault is
         return success && abi.decode(data, (bool));
     }
 
-    function getFundConfig() external view returns (ViewHelper.FundConfig memory config) {
-        return ViewHelper.FundConfig({
+    function getFundConfig() external view returns (FundConfig memory config) {
+        return FundConfig({
             managementFeeBps: feeStorage.managementFeeBps,
             performanceFeeBps: feeStorage.performanceFeeBps,
             entranceFeeBps: feeStorage.entranceFeeBps,
