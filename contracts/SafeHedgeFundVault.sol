@@ -538,7 +538,7 @@ contract SafeHedgeFundVault is
             shares,
             totalSupply(),
             currentAum,
-            _burn,
+            _burnShares,
             _emergencyPayout
         );
     }
@@ -725,8 +725,8 @@ contract SafeHedgeFundVault is
         _mint(user, shares);
     }
 
-    function _burn(address user, uint256 shares) internal override {
-        super._burn(user, shares);
+    function _burnShares(address user, uint256 shares) internal {
+        _burn(user, shares);
     }
 
     function _emitDepositSkipped(uint256 idx, address user, uint256 amount, string memory reason) internal {

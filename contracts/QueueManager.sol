@@ -206,7 +206,7 @@ library QueueManager {
         function(uint256) external returns (uint256, uint256) accrueEntranceFee,
         function(uint256, address, uint256, string memory) external emitDepositSkipped,
         function() view returns (uint256) getMaxBatchSize
-    ) external returns (uint256 processed) {
+    ) internal returns (uint256 processed) {
         uint256 batchLimit = getMaxBatchSize();
         if (maxToProcess == 0 || maxToProcess > batchLimit) revert InvalidBatch();
 
@@ -250,7 +250,7 @@ library QueueManager {
         function(address, uint256, uint256) external returns (bool, uint256) payout,
         function(uint256, address, uint256, string memory) external emitRedemptionSkipped,
         function() view returns (uint256) getMaxBatchSize
-    ) external returns (uint256 processed) {
+    ) internal returns (uint256 processed) {
         uint256 batchLimit = getMaxBatchSize();
         if (maxToProcess == 0 || maxToProcess > batchLimit) revert InvalidBatch();
 
