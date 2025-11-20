@@ -162,7 +162,7 @@ library QueueManager {
         function(uint256) view returns (uint256) normalize,
         function(uint256) view returns (uint256) denormalize,
         function(uint256) external returns (uint256, uint256) accrueEntranceFee
-    ) external returns (bool success, uint256 sharesMinted, uint256 netAmount) {
+    ) internal returns (bool success, uint256 sharesMinted, uint256 netAmount) {
         if (queueIdx >= qs.depositQueueTail || qs.depositQueue[queueIdx].processed) return (false, 0, 0);
 
         QueueItem storage item = qs.depositQueue[queueIdx];

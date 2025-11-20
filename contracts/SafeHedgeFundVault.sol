@@ -725,7 +725,7 @@ contract SafeHedgeFundVault is
         _mint(user, shares);
     }
 
-    function _burn(address user, uint256 shares) internal {
+    function _burn(address user, uint256 shares) internal override {
         super._burn(user, shares);
     }
 

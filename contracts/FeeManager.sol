@@ -311,7 +311,7 @@ library FeeManager {
         entrance = fs.accruedEntranceFees;
         exit = fs.accruedExitFees;
         total = mgmt + perf + entrance + exit;
-        // Note: totalNative will be calculated by vault using denormalize
+        totalNative = 0; // Note: totalNative will be calculated by vault using denormalize
     }
 
     /**

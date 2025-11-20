@@ -95,7 +95,7 @@ library AUMManager {
         uint256 highWaterMark,
         uint256 lowestNavInDrawdown,
         uint256 recoveryStartTime,
-        uint256 currentNav
+        uint256 /* currentNav */
     ) internal view returns (
         uint256 hwm,
         uint256 lowestNav,
