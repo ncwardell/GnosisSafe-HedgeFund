@@ -18,25 +18,25 @@ library ProcessingHelper {
      * @notice Process deposit mints for a batch
      * @dev Called after deposits are marked as processed in QueueManager
      * @param queueStorage Queue storage struct
-     * @param feeStorage Fee storage struct
      * @param startIdx Starting index in the queue
      * @param count Number of items to process
      * @param nav Current NAV per share
      * @param baseToken Base token address
      * @param safeWallet Safe wallet address
      * @param normalize Function to normalize amounts
+     * @param accrueEntranceFee Function to accrue entrance fee
      * @param mint Function to mint shares
      * @param emitDeposited Function to emit Deposited event
      */
     function processDepositMints(
         QueueManager.QueueStorage storage queueStorage,
-        FeeManager.FeeStorage storage feeStorage,
         uint256 startIdx,
         uint256 count,
         uint256 nav,
         IERC20 baseToken,
         address safeWallet,
         function(uint256) internal view returns (uint256) normalize,
+        function(uint256) internal returns (uint256, uint256) accrueEntranceFee,
         function(address, uint256) internal mint,
         function(address, uint256, uint256) internal emitDeposited
     ) internal {
@@ -45,7 +45,7 @@ library ProcessingHelper {
             QueueManager.QueueItem storage item = queueStorage.depositQueue[idx];
 
             if (item.processed && item.amount > 0) {
-                (uint256 netAmountNative, ) = feeStorage.accrueEntranceFee(item.amount);
+                (uint256 netAmountNative, ) = accrueEntranceFee(item.amount);
                 uint256 netAmount = normalize(netAmountNative);
                 uint256 shares = nav > 0 ? (netAmount * 1e18) / nav : netAmount;
 
