@@ -1,0 +1,28 @@
+{
+  "canisters": {
+    "platform": {
+      "main": "backend/main.mo",
+      "type": "motoko"
+    },
+    "shareToken": {
+      "main": "backend/tokens/ShareToken.mo",
+      "type": "motoko"
+    },
+    "frontend": {
+      "dependencies": ["platform"],
+      "frontend": {
+        "entrypoint": "frontend/index.html"
+      },
+      "source": ["frontend/dist"],
+      "type": "assets"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
