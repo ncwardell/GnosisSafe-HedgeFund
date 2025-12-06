@@ -1,11 +1,12 @@
 /// Fixed-point decimal library with 18 decimal places
 /// All values are stored as Nat representing value * 10^18
 /// This provides precision similar to Solidity's uint256 with 18 decimals
+import Nat "mo:base/Nat";
+import Int "mo:base/Int";
+import Float "mo:base/Float";
+import Debug "mo:base/Debug";
+
 module {
-  import Nat "mo:base/Nat";
-  import Int "mo:base/Int";
-  import Float "mo:base/Float";
-  import Debug "mo:base/Debug";
 
   /// Decimal type - internally stores value * 10^18
   public type Decimal = Nat;
