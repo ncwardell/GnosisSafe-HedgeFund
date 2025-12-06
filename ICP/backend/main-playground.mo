@@ -25,16 +25,16 @@ actor HedgeFundPlayground {
   };
 
   // Simple share tracking (embedded instead of separate canister)
-  private let shares = HashMap.HashMap<Principal, Decimal>(10, Principal.equal, Principal.hash);
+  private transient let shares = HashMap.HashMap<Principal, Decimal>(10, Principal.equal, Principal.hash);
   private var totalShares : Decimal = Decimal.zero();
 
   // Fund state
   private var fundConfig : ?FundConfig = null;
-  private let feeStorage = FeeManager.initStorage();
-  private let queueStorage = QueueManager.initStorage();
+  private transient let feeStorage = FeeManager.initStorage();
+  private transient let queueStorage = QueueManager.initStorage();
 
   // Simulated base token balances (in real version, this would be ICRC-1 ledger)
-  private let baseTokenBalances = HashMap.HashMap<Principal, Decimal>(10, Principal.equal, Principal.hash);
+  private transient let baseTokenBalances = HashMap.HashMap<Principal, Decimal>(10, Principal.equal, Principal.hash);
 
   // Admin
   private stable var admin : ?Principal = null;
@@ -148,7 +148,8 @@ actor HedgeFundPlayground {
       maxToProcess,
       feeStorage.navPerShare,
       func(amount : Decimal) : (Decimal, Decimal) {
-        FeeManager.accrueEntranceFee(feeStorage, amount)
+        let fees = FeeManager.accrueEntranceFee(feeStorage, amount);
+        (fees.netAmount, fees.feeAmount)
       }
     );
 
