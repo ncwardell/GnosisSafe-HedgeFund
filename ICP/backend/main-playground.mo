@@ -26,10 +26,10 @@ actor HedgeFundPlayground {
 
   // Simple share tracking (embedded instead of separate canister)
   private transient let shares = HashMap.HashMap<Principal, Decimal>(10, Principal.equal, Principal.hash);
-  private var totalShares : Decimal = Decimal.zero();
+  private transient var totalShares : Decimal = Decimal.zero();
 
   // Fund state
-  private var fundConfig : ?FundConfig = null;
+  private transient var fundConfig : ?FundConfig = null;
   private transient let feeStorage = FeeManager.initStorage();
   private transient let queueStorage = QueueManager.initStorage();
 
