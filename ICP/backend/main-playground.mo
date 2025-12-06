@@ -10,7 +10,7 @@ import Debug "mo:base/Debug";
 import Iter "mo:base/Iter";
 import Array "mo:base/Array";
 
-actor HedgeFundPlayground {
+persistent actor HedgeFundPlayground {
 
   type Decimal = Decimal.Decimal;
 
