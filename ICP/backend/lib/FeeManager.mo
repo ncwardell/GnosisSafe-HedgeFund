@@ -11,7 +11,7 @@ module {
 
   // Constants
   private let NANOS_PER_YEAR : Nat = 31_557_600_000_000_000; // 365.25 days in nanoseconds
-  private let MAX_TIME_DELTA : Nat = 365 * 24 * 60 * 60 * 1_000_000_000; // 1 year in nanoseconds
+  private let MAX_TIME_DELTA : Nat = 31_536_000_000_000_000; // 1 year in nanoseconds (365 * 24 * 60 * 60 * 1_000_000_000)
 
   // Fee storage
   public type FeeStorage = {
