@@ -9,8 +9,6 @@ import Iter "mo:base/Iter";
 import Float "mo:base/Float";
 import Array "mo:base/Array";
 import Migration "migration";
-import Storage "blob-storage/Storage";
-import MixinStorage "blob-storage/Mixin";
 
 (with migration = Migration.run)
 actor HedgeFundPlatform {
@@ -800,16 +798,5 @@ actor HedgeFundPlatform {
   public query func getPlatformFeeRate() : async Float {
     // Public read access - no authentication required
     platformFeeRate;
-  };
-
-  // File Storage Integration
-  let storage = Storage.new();
-  include MixinStorage(storage);
-
-  // Track file references
-  type Data = {
-    id : Text;
-    blob : Storage.ExternalBlob;
-    name : Text;
   };
 };
